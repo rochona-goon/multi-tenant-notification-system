@@ -39,17 +39,27 @@ public class NotificationServiceImplTest {
         savedNotification.setRecipient("goon.rochona@gmail.com");
         savedNotification.setStatus(NotificationStatus.PENDING);
 
-
         when(notificationRepository.save(any(Notification.class)))
-                .thenReturn(savedNotification);
+                .thenAnswer(invocation -> {
+                    Notification notification = invocation.getArgument(0);
 
+                    if(notification.getId() == null)
+                        notification.setId(1L);
+
+                    return notification;
+                });
+
+        Tenant tenant = new Tenant();
+        tenant.setName("Test tenant");
+        tenant.setId(1L);
 
         // Act
 
         Notification result = notificationService.createNotification(
                 "Hi",
                 "Hi there, how are you doing?",
-                "goon.rochona@gmail.com"
+                "goon.rochona@gmail.com",
+                tenant
         );
 
         // Assert
@@ -60,10 +70,7 @@ public class NotificationServiceImplTest {
         assertEquals("Hi there, how are you doing?", result.getMessage());
         assertEquals("goon.rochona@gmail.com", result.getRecipient());
         assertEquals(NotificationStatus.SENT, result.getStatus());
-
-//        verify(notificationRepository, times(2)).save(any(Notification.class));
-//
-//        verify(notificationSender, times(1)).send(any(Notification.class));
+        assertSame(tenant, result.getTenant());
 
         InOrder inOrder = inOrder(notificationRepository, notificationSender);
 
@@ -84,18 +91,30 @@ public class NotificationServiceImplTest {
         savedNotification.setStatus(NotificationStatus.PENDING);
 
         when(notificationRepository.save(any(Notification.class)))
-                .thenReturn(savedNotification);
+                .thenAnswer(invocation -> {
+                    Notification notification = invocation.getArgument(0);
+
+                    if(notification.getId() == null)
+                        notification.setId(1L);
+
+                    return notification;
+                });
 
         doThrow(new RuntimeException("Email Delivery Failed"))
                 .when(notificationSender)
                 .send(any(Notification.class));
+
+        Tenant tenant = new Tenant();
+        tenant.setName("Test tenant");
+        tenant.setId(1L);
 
         // Act
 
         Notification result = notificationService.createNotification(
                 "Hello",
                 "Hello there, how are you doing?",
-                "goon.rochona@gmail.com"
+                "goon.rochona@gmail.com",
+                tenant
         );
 
         // Assert
@@ -103,9 +122,6 @@ public class NotificationServiceImplTest {
         assertNotNull(result);
         assertEquals(NotificationStatus.FAILED, result.getStatus());
 
-//        verify(notificationRepository, times(2)).save(any(Notification.class));
-//
-//        verify(notificationSender, times(1)).send(any(Notification.class));
         InOrder inOrder = inOrder(notificationRepository, notificationSender);
 
         inOrder.verify(notificationRepository).save(any(Notification.class));

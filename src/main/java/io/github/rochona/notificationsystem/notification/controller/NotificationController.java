@@ -25,7 +25,7 @@ public class NotificationController {
     public ResponseEntity<NotificationResponseDTO> sendNotification(@Valid @RequestBody NotificationRequestDTO requestDTO){
         NotificationResponseDTO responseDTO = new NotificationResponseDTO();
 
-            Notification notification = notificationService.createNotification(requestDTO.getSubject(), requestDTO.getMessage(), requestDTO.getRecipient());
+            Notification notification = notificationService.createNotification(requestDTO.getSubject(), requestDTO.getMessage(), requestDTO.getRecipient(), requestDTO.getTenant());
 
             responseDTO.setId(notification.getId());
             responseDTO.setSubject(notification.getSubject());

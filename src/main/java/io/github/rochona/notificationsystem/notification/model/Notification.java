@@ -1,6 +1,7 @@
 package io.github.rochona.notificationsystem.notification.model;
 
 import io.github.rochona.notificationsystem.notification.enums.NotificationStatus;
+import io.github.rochona.notificationsystem.tenant.Tenant;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -21,6 +22,10 @@ public class Notification {
     private String subject;
     private String recipient;
     private String message;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "tenant_id", nullable = false)
+    private Tenant tenant;
 
     @Enumerated(value = EnumType.STRING)
     private NotificationStatus status = NotificationStatus.PENDING;

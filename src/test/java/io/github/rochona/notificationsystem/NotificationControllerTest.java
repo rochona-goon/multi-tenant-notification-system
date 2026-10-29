@@ -45,13 +45,19 @@ public class NotificationControllerTest {
         notification.setStatus(NotificationStatus.PENDING);
 
         when(notificationService.createNotification(
-                anyString(), anyString(), anyString()
+                anyString(), anyString(), anyString(), any(Tenant.class)
         )).thenReturn(notification);
 
         NotificationRequestDTO requestDTO = new NotificationRequestDTO();
         requestDTO.setSubject("Test Subject");
         requestDTO.setMessage("Test Message");
         requestDTO.setRecipient("testrecipient@gmail.com");
+
+        Tenant tenant = new Tenant();
+        tenant.setId(1L);
+        tenant.setName("Test Tenant");
+
+        requestDTO.setTenant(tenant);
 
 
         // Act
@@ -60,7 +66,7 @@ public class NotificationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(requestDTO)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.id").value(1L))
                 .andExpect(jsonPath("$.recipient").value("testrecipient@gmail.com"))
                 .andExpect(jsonPath("$.notificationStatus").value("PENDING"))
                 .andExpect(jsonPath("$.responseStatus").value("SUCCESS"));

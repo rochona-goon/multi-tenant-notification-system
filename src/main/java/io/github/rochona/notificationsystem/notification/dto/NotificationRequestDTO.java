@@ -18,4 +18,6 @@ public class NotificationRequestDTO {
     @NotBlank(message = "Recipient must not be blank")
     @Email(message = "Please provide a valid email")
     private String recipient;
+
+    private Tenant tenant;
 }

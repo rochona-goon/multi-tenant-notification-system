@@ -1,49 +1,130 @@
-# multi-tenant-notification-system
-A multi-tenant notification platform built with Java 21 and Spring Boot, featuring asynchronous delivery, RabbitMQ, tenant isolation, and reliable message processing.
+# Multi-tenant Notification System
 
+## Overview
 
-## Mailpit Email Integration
+A backend notification platform built with Java and Spring Boot. The system is being developed to support multiple organizations, with tenant-specific notification ownership and asynchronous email delivery.
 
-The application uses [Mailpit](https://mailpit.axllent.org/) as a local SMTP server for testing email delivery without sending emails to real recipients.
+## Technology Stack
+
+- **Language:** Java 21
+- **Framework:** Spring Boot
+- **Database:** PostgreSQL
+- **Persistence:** Spring Data JPA / Hibernate
+- **Messaging and Delivery:** Mailpit for local email testing
+- **Build Tool:** Maven
+- **Testing:** JUnit 5, Mockito, Spring Boot Test, MockMvc
+
+## Project Setup
 
 ### Prerequisites
 
-- Docker Desktop
+Ensure the following are installed:
+
 - Java 21
 - PostgreSQL
+- Maven (or use the included Maven Wrapper)
+- Docker, if using Mailpit through Docker
 
-### Start Mailpit
+### Database Configuration
+
+1. Create a PostgreSQL database named `notification_system`.
+2. Configure the database connection in `src/main/resources/application.properties`.
+
+Example configuration:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/notification_system
+spring.datasource.username=${DB_USERNAME}
+spring.datasource.password=${DB_PASSWORD}
+
+spring.jpa.hibernate.ddl-auto=update
+```
+
+Replace the environment variables with your local database credentials. The Hibernate `update` setting is intended for local development; a versioned migration strategy is preferable for production.
+
+### Run the Application
+
+On Windows:
 
 ```bash
-docker run -d --name mailpit -p 8025:8025 -p 1025:1025 axllent/mailpit
+mvnw.cmd spring-boot:run
 ```
 
-- **SMTP:** `localhost:1025`
-- **Web UI:** http://localhost:8025
+On macOS/Linux:
 
-If the container already exists, start it with `docker start mailpit`.
-
-### Run Tests
-
-Run the Mailpit integration test:
-
-```powershell
-./mvnw.cmd test "-Dtest=MailpitIntegrationTest"
+```bash
+./mvnw spring-boot:run
 ```
 
-Run notification service unit tests:
+The application starts on port `8080` by default.
 
-```powershell
-./mvnw.cmd test "-Dtest=NotificationServiceImplTest"
+## Mailpit Integration
+
+Mailpit is used to test email delivery locally without sending real emails.
+
+- Configure the application's SMTP settings to point to the local Mailpit SMTP server.
+- Start Mailpit using your local setup or Docker.
+- Trigger a notification through the API and inspect the captured email in the Mailpit web interface.
+
+Mailpit's default ports are `1025` for SMTP and `8025` for its web interface, unless configured otherwise.
+
+## API Endpoint
+
+### Create Notification
+
+`POST /notify`
+
+Example request:
+
+```json
+{
+  "subject": "Welcome",
+  "message": "Welcome to our platform!",
+  "recipient": "user@example.com"
+}
 ```
 
-The integration test requires PostgreSQL to be running and the `DB_PASSWORD` environment variable to be configured.
+The endpoint accepts notification details and returns a response containing the notification information and processing status.
 
-### Verify Email Delivery
+## Multi-tenancy Foundation
 
-After a successful integration test, open the Mailpit web UI and verify that the test email appears in the inbox.
+### Tenant Model
 
-The notification service also tracks delivery attempts using `PENDING`, `SENT`, and `FAILED` statuses.
+Introduced the `Tenant` entity to represent organizations using the notification platform.
 
-**Note:** `SENT` indicates that the SMTP server accepted the email; it does not guarantee delivery to the recipient's actual inbox.
+### Notification Ownership
 
+- Added a many-to-one relationship between `Notification` and `Tenant`.
+- Introduced the `tenant_id` foreign key in the `notifications` table.
+- Associated existing notification records with a tenant while preserving existing data.
+
+### Repository and Service Changes
+
+- Added `TenantRepository` with API-key lookup support.
+- Updated notification creation to associate notifications with a tenant.
+- Updated unit and controller tests to reflect the new relationship.
+
+**Current limitation:** API-key authentication, secure API-key storage, and tenant isolation are not yet implemented. Passing the tenant through the request DTO is temporary and will be replaced by authentication-based tenant resolution.
+
+## Running Tests
+
+On Windows:
+
+```bash
+mvnw.cmd test
+```
+
+On macOS/Linux:
+
+```bash
+./mvnw test
+```
+
+## Development Status
+
+- [x] Basic notification API
+- [x] Local email testing with Mailpit
+- [x] Initial tenant model and notification ownership relationship
+- [ ] Secure API-key authentication
+- [ ] Tenant data isolation
+- [ ] Further integration and security testing

@@ -19,13 +19,14 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public Notification createNotification(String subject, String message, String recipient) {
+    public Notification createNotification(String subject, String message, String recipient, Tenant tenant) {
         // Validations
 
         Notification notification = new Notification();
         notification.setSubject(subject);
         notification.setMessage(message);
         notification.setRecipient(recipient);
+        notification.setTenant(tenant);
 
         Notification savedNotification = notificationRepository.save(notification);
 
@@ -36,6 +37,7 @@ public class NotificationServiceImpl implements NotificationService {
         } catch (Exception e) {
             savedNotification.setStatus(NotificationStatus.FAILED);
         }
+
 
         return notificationRepository.save(savedNotification);
     }
