@@ -1,5 +1,6 @@
 package io.github.rochona.notificationsystem.notification.dto;
 
+import io.github.rochona.notificationsystem.tenant.Tenant;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
