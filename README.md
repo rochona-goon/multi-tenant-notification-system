@@ -2,7 +2,7 @@
 
 ## Overview
 
-A backend notification platform built with Java and Spring Boot. The system is being developed to support multiple organizations, with tenant-specific notification ownership and asynchronous email delivery.
+A backend notification platform built with Java and Spring Boot. The system is being developed to support multiple organizations, with tenant-specific notification ownership, API-key-based authentication, and email delivery.
 
 ## Technology Stack
 
@@ -68,13 +68,43 @@ Mailpit is used to test email delivery locally without sending real emails.
 
 Mailpit's default ports are `1025` for SMTP and `8025` for its web interface, unless configured otherwise.
 
-## API Endpoint
+## API Endpoints
 
-### Create Notification
+### 1. Register Tenant
+
+`POST /signUp`
+
+Registers a new tenant and generates a unique API key.
+
+Example request:
+
+```json
+{
+  "tenantName": "Example Organization"
+}
+```
+
+The response contains the tenant ID, tenant name, and generated API key.
+
+**Security considerations:**
+- API keys are generated using `SecureRandom`.
+- Generated API keys contain 256 bits of randomness.
+- Only the SHA-256 hash of the API key is stored in the database.
+- The raw API key is returned during registration and should be stored securely by the client.
+
+### 2. Create Notification
 
 `POST /notify`
 
-Example request:
+This endpoint requires tenant authentication through the `X-API-Key` request header.
+
+Example request header:
+
+```text
+X-API-Key: <your-api-key>
+```
+
+Example request body:
 
 ```json
 {
@@ -84,9 +114,11 @@ Example request:
 }
 ```
 
-The endpoint accepts notification details and returns a response containing the notification information and processing status.
+The authenticated tenant is resolved from the API key by the tenant authentication interceptor. The client does not supply tenant information in the notification request.
 
-## Multi-tenancy Foundation
+Requests with missing, blank, or invalid API keys are rejected with `401 Unauthorized`.
+
+## Multi-tenancy and Security
 
 ### Tenant Model
 
@@ -97,14 +129,36 @@ Introduced the `Tenant` entity to represent organizations using the notification
 - Added a many-to-one relationship between `Notification` and `Tenant`.
 - Introduced the `tenant_id` foreign key in the `notifications` table.
 - Associated existing notification records with a tenant while preserving existing data.
+- Updated notification creation to associate notifications with the authenticated tenant.
 
-### Repository and Service Changes
+### API Key Generation and Storage
 
-- Added `TenantRepository` with API-key lookup support.
-- Updated notification creation to associate notifications with a tenant.
-- Updated unit and controller tests to reflect the new relationship.
+- Implemented secure API-key generation using Java's `SecureRandom`.
+- Added a unique API-key prefix: `ntf_live_`.
+- Implemented SHA-256 hashing for API keys.
+- Only hashed API keys are stored in the database.
+- Raw API keys are returned only during tenant registration.
 
-**Current limitation:** API-key authentication, secure API-key storage, and tenant isolation are not yet implemented. Passing the tenant through the request DTO is temporary and will be replaced by authentication-based tenant resolution.
+### Tenant Authentication
+
+- Implemented `TenantAuthenticationService` to authenticate tenants using API keys.
+- Added `TenantAuthenticationInterceptor` to validate incoming requests.
+- Configured the interceptor to protect the notification endpoint.
+- Authenticated tenant information is stored as a request attribute and used during notification creation.
+- Added exception handling for invalid or missing API keys.
+
+### Testing
+
+Added automated tests covering:
+
+- API-key generation.
+- API-key hashing.
+- Tenant registration.
+- Tenant authentication.
+- Notification controller request validation and authentication.
+- Existing notification functionality and Mailpit integration.
+
+**Current limitation:** Tenant authentication and notification ownership are implemented, but tenant data isolation is still pending. Repository-level and service-level access restrictions will be added to ensure that tenants can access only their own notifications.
 
 ## Running Tests
 
@@ -125,6 +179,12 @@ On macOS/Linux:
 - [x] Basic notification API
 - [x] Local email testing with Mailpit
 - [x] Initial tenant model and notification ownership relationship
-- [ ] Secure API-key authentication
+- [x] Tenant registration API
+- [x] Secure API-key generation
+- [x] API-key hashing and secure storage
+- [x] Tenant API-key authentication
+- [x] Interceptor-based request authentication
+- [x] Associate notifications with authenticated tenants
+- [x] Automated tests for tenant registration and authentication
 - [ ] Tenant data isolation
 - [ ] Further integration and security testing
