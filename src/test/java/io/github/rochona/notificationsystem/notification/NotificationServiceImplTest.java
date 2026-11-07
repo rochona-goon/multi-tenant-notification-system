@@ -1,11 +1,11 @@
-package io.github.rochona.notificationsystem;
+package io.github.rochona.notificationsystem.notification;
 
 import io.github.rochona.notificationsystem.notification.enums.NotificationStatus;
 import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.repository.NotificationRepository;
 import io.github.rochona.notificationsystem.notification.sender.NotificationSender;
 import io.github.rochona.notificationsystem.notification.service.NotificationServiceImpl;
-import io.github.rochona.notificationsystem.tenant.Tenant;
+import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;

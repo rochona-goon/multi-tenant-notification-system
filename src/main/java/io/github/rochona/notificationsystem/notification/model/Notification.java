@@ -1,7 +1,7 @@
 package io.github.rochona.notificationsystem.notification.model;
 
 import io.github.rochona.notificationsystem.notification.enums.NotificationStatus;
-import io.github.rochona.notificationsystem.tenant.Tenant;
+import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

@@ -1,4 +1,4 @@
-package io.github.rochona.notificationsystem;
+package io.github.rochona.notificationsystem.notification;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

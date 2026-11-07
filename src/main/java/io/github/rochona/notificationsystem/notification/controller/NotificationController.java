@@ -5,6 +5,8 @@ import io.github.rochona.notificationsystem.notification.dto.NotificationRespons
 import io.github.rochona.notificationsystem.notification.service.NotificationService;
 import io.github.rochona.notificationsystem.shared.ResponseStatus;
 import io.github.rochona.notificationsystem.notification.model.Notification;
+import io.github.rochona.notificationsystem.tenant.model.Tenant;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,10 +24,11 @@ public class NotificationController {
     }
 
     @PostMapping("/notify")
-    public ResponseEntity<NotificationResponseDTO> sendNotification(@Valid @RequestBody NotificationRequestDTO requestDTO){
+    public ResponseEntity<NotificationResponseDTO> sendNotification(@Valid @RequestBody NotificationRequestDTO requestDTO, HttpServletRequest request){
         NotificationResponseDTO responseDTO = new NotificationResponseDTO();
+        Tenant tenant = (Tenant) request.getAttribute("authenticatedTenant");
 
-            Notification notification = notificationService.createNotification(requestDTO.getSubject(), requestDTO.getMessage(), requestDTO.getRecipient(), requestDTO.getTenant());
+            Notification notification = notificationService.createNotification(requestDTO.getSubject(), requestDTO.getMessage(), requestDTO.getRecipient(), tenant);
 
             responseDTO.setId(notification.getId());
             responseDTO.setSubject(notification.getSubject());

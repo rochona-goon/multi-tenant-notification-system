@@ -1,4 +1,4 @@
-package io.github.rochona.notificationsystem.tenant;
+package io.github.rochona.notificationsystem.tenant.model;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -15,5 +15,7 @@ public class Tenant {
 
     @Column(nullable = false)
     private String name;
-    private String apiKey;
+
+    @Column(name = "api_key_hash", nullable = false, unique = true)
+    private String apiKeyHash;
 }

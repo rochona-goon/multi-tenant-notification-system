@@ -4,7 +4,7 @@ import io.github.rochona.notificationsystem.notification.enums.NotificationStatu
 import io.github.rochona.notificationsystem.notification.repository.NotificationRepository;
 import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.sender.NotificationSender;
-import io.github.rochona.notificationsystem.tenant.Tenant;
+import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import org.springframework.stereotype.Service;
 
 @Service

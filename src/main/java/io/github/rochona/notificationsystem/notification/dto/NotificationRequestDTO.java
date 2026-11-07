@@ -1,6 +1,6 @@
 package io.github.rochona.notificationsystem.notification.dto;
 
-import io.github.rochona.notificationsystem.tenant.Tenant;
+import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
@@ -19,5 +19,5 @@ public class NotificationRequestDTO {
     @Email(message = "Please provide a valid email")
     private String recipient;
 
-    private Tenant tenant;
+//    private Tenant tenant;
 }
