@@ -1,190 +1,160 @@
-# Multi-tenant Notification System
+# Phase 3 – Tenant Management, API-Key Authentication & Tenant Isolation
 
 ## Overview
 
-A backend notification platform built with Java and Spring Boot. The system is being developed to support multiple organizations, with tenant-specific notification ownership, API-key-based authentication, and email delivery.
+This phase extends the notification system to support multiple tenants with API-key-based authentication and tenant-level data isolation.
 
-## Technology Stack
+Each tenant receives a unique API key during registration. Authenticated tenants can create, retrieve and delete only their own notifications.
 
-- **Language:** Java 21
-- **Framework:** Spring Boot
-- **Database:** PostgreSQL
-- **Persistence:** Spring Data JPA / Hibernate
-- **Messaging and Delivery:** Mailpit for local email testing
-- **Build Tool:** Maven
-- **Testing:** JUnit 5, Mockito, Spring Boot Test, MockMvc
+## Features Implemented
 
-## Project Setup
+### 1. Tenant Registration
 
-### Prerequisites
+- Implemented `Tenant` entity and `TenantRepository`.
+- Implemented tenant registration through `TenantService`.
+- Added `TenantController` to expose tenant registration through a REST API.
+- Added request validation for tenant names.
 
-Ensure the following are installed:
+**Endpoint:**
 
-- Java 21
-- PostgreSQL
-- Maven (or use the included Maven Wrapper)
-- Docker, if using Mailpit through Docker
+`POST /tenants/signUp`
 
-### Database Configuration
+The registration response contains:
+- Tenant ID
+- Tenant name
+- Generated API key
 
-1. Create a PostgreSQL database named `notification_system`.
-2. Configure the database connection in `src/main/resources/application.properties`.
+The raw API key is returned only during registration.
 
-Example configuration:
+### 2. Secure API-Key Generation and Storage
 
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/notification_system
-spring.datasource.username=${DB_USERNAME}
-spring.datasource.password=${DB_PASSWORD}
+- Implemented API-key generation using Java's `SecureRandom`.
+- Generated 256-bit random API keys.
+- Added the `ntf_live_` prefix.
+- Implemented SHA-256 hashing using `ApiKeyHasher`.
+- Only hashed API keys are stored in PostgreSQL.
+- Raw API keys are returned to the client during registration and are not persisted.
 
-spring.jpa.hibernate.ddl-auto=update
-```
+### 3. Tenant Authentication
 
-Replace the environment variables with your local database credentials. The Hibernate `update` setting is intended for local development; a versioned migration strategy is preferable for production.
+Implemented `TenantAuthenticationService` to authenticate tenants using their API keys.
 
-### Run the Application
+Authentication flow:
 
-On Windows:
+1. Extract the API key from the `X-API-Key` request header.
+2. Validate that the API key is present.
+3. Hash the supplied API key.
+4. Find the tenant using the stored API-key hash.
+5. Return the authenticated tenant or throw `InvalidApiKeyException`.
 
-```bash
-mvnw.cmd spring-boot:run
-```
+### 4. Tenant Authentication Interceptor
 
-On macOS/Linux:
+Implemented `TenantAuthenticationInterceptor` using Spring MVC's `HandlerInterceptor`.
 
-```bash
-./mvnw spring-boot:run
-```
+Responsibilities:
 
-The application starts on port `8080` by default.
+- Extract the API key from incoming requests.
+- Authenticate the tenant.
+- Store the authenticated tenant in the request attribute `authenticatedTenant`.
 
-## Mailpit Integration
+Registered the interceptor through `WebMvcConfig` to protect `/notifications` endpoints.
 
-Mailpit is used to test email delivery locally without sending real emails.
+### 5. Notification-Tenant Association
 
-- Configure the application's SMTP settings to point to the local Mailpit SMTP server.
-- Start Mailpit using your local setup or Docker.
-- Trigger a notification through the API and inspect the captured email in the Mailpit web interface.
+Updated the `Notification` entity to establish a many-to-one relationship with `Tenant`.
 
-Mailpit's default ports are `1025` for SMTP and `8025` for its web interface, unless configured otherwise.
+- Added the `tenant_id` foreign key.
+- Associated notifications with their owning tenant.
+- Updated notification creation to use the authenticated tenant.
+
+### 6. Tenant Data Isolation
+
+Implemented tenant-scoped notification operations.
+
+- Fetch all notifications belonging to the authenticated tenant.
+- Fetch a notification using both its ID and tenant.
+- Delete notifications using notification ID, tenant and notification status.
+- Prevent access to notifications belonging to other tenants.
+
+A tenant attempting to access another tenant's notification receives a notification-not-found response.
+
+### 7. Exception Handling
+
+Added exception handling for:
+
+- Missing or invalid API keys – `401 Unauthorized`.
+- Notifications not found for the authenticated tenant – `404 Not Found`.
+- Notifications that cannot be deleted – `409 Conflict`.
 
 ## API Endpoints
 
-### 1. Register Tenant
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/tenants/signUp` | Register a tenant |
+| POST | `/notifications/create` | Create a notification |
+| GET | `/notifications` | Fetch all notifications belonging to the authenticated tenant |
+| GET | `/notifications/{id}` | Fetch a notification by ID |
+| DELETE | `/notifications/{id}` | Delete a pending notification |
 
-`POST /signUp`
+### Authentication
 
-Registers a new tenant and generates a unique API key.
-
-Example request:
-
-```json
-{
-  "tenantName": "Example Organization"
-}
-```
-
-The response contains the tenant ID, tenant name, and generated API key.
-
-**Security considerations:**
-- API keys are generated using `SecureRandom`.
-- Generated API keys contain 256 bits of randomness.
-- Only the SHA-256 hash of the API key is stored in the database.
-- The raw API key is returned during registration and should be stored securely by the client.
-
-### 2. Create Notification
-
-`POST /notify`
-
-This endpoint requires tenant authentication through the `X-API-Key` request header.
-
-Example request header:
+All notification endpoints require the following request header:
 
 ```text
-X-API-Key: <your-api-key>
+X-API-Key: <your-tenant-api-key>
 ```
 
-Example request body:
+Tenant registration does not require API-key authentication.
 
-```json
-{
-  "subject": "Welcome",
-  "message": "Welcome to our platform!",
-  "recipient": "user@example.com"
-}
-```
+## Testing
 
-The authenticated tenant is resolved from the API key by the tenant authentication interceptor. The client does not supply tenant information in the notification request.
+Automated tests were implemented using:
 
-Requests with missing, blank, or invalid API keys are rejected with `401 Unauthorized`.
+- JUnit 5
+- Mockito
+- AssertJ
+- Spring Boot Test
+- MockMvc
 
-## Multi-tenancy and Security
+Test coverage includes:
 
-### Tenant Model
+- Tenant registration and request validation.
+- API-key generation and hashing.
+- Valid, invalid and missing API-key authentication.
+- Notification creation and retrieval.
+- Tenant-scoped notification retrieval.
+- Cross-tenant access rejection.
+- Successful deletion of pending notifications.
+- Rejection of deletion for non-pending notifications.
+- Exception handling.
+- Mailpit email integration.
 
-Introduced the `Tenant` entity to represent organizations using the notification platform.
+**Test execution result: 36 tests passed.**
 
-### Notification Ownership
+## Deferred Integration Testing
 
-- Added a many-to-one relationship between `Notification` and `Tenant`.
-- Introduced the `tenant_id` foreign key in the `notifications` table.
-- Associated existing notification records with a tenant while preserving existing data.
-- Updated notification creation to associate notifications with the authenticated tenant.
+Comprehensive integration testing will be performed during a dedicated testing phase after core feature development.
 
-### API Key Generation and Storage
+Planned coverage:
 
-- Implemented secure API-key generation using Java's `SecureRandom`.
-- Added a unique API-key prefix: `ntf_live_`.
-- Implemented SHA-256 hashing for API keys.
-- Only hashed API keys are stored in the database.
-- Raw API keys are returned only during tenant registration.
+- PostgreSQL integration testing using Testcontainers.
+- RabbitMQ integration testing using Testcontainers.
+- Repository-level tenant-isolation verification.
+- Integration testing across application components.
 
-### Tenant Authentication
+## Phase 3 Completion Status
 
-- Implemented `TenantAuthenticationService` to authenticate tenants using API keys.
-- Added `TenantAuthenticationInterceptor` to validate incoming requests.
-- Configured the interceptor to protect the notification endpoint.
-- Authenticated tenant information is stored as a request attribute and used during notification creation.
-- Added exception handling for invalid or missing API keys.
-
-### Testing
-
-Added automated tests covering:
-
-- API-key generation.
-- API-key hashing.
-- Tenant registration.
-- Tenant authentication.
-- Notification controller request validation and authentication.
-- Existing notification functionality and Mailpit integration.
-
-**Current limitation:** Tenant authentication and notification ownership are implemented, but tenant data isolation is still pending. Repository-level and service-level access restrictions will be added to ensure that tenants can access only their own notifications.
-
-## Running Tests
-
-On Windows:
-
-```bash
-mvnw.cmd test
-```
-
-On macOS/Linux:
-
-```bash
-./mvnw test
-```
-
-## Development Status
-
-- [x] Basic notification API
-- [x] Local email testing with Mailpit
-- [x] Initial tenant model and notification ownership relationship
-- [x] Tenant registration API
+- [x] Tenant registration
 - [x] Secure API-key generation
-- [x] API-key hashing and secure storage
-- [x] Tenant API-key authentication
-- [x] Interceptor-based request authentication
-- [x] Associate notifications with authenticated tenants
-- [x] Automated tests for tenant registration and authentication
-- [ ] Tenant data isolation
-- [ ] Further integration and security testing
+- [x] API-key hashing and storage
+- [x] Tenant authentication service
+- [x] Authentication interceptor
+- [x] Notification-tenant association
+- [x] Tenant-scoped notification retrieval
+- [x] Tenant-scoped notification deletion
+- [x] Exception handling
+- [x] Controller and service unit tests
+- [x] Full test suite – 36 tests passed
+- [ ] Comprehensive Testcontainers-based integration testing (deferred)
+
+**Phase 3: Core implementation completed.**

@@ -1,5 +1,7 @@
 package io.github.rochona.notificationsystem.shared;
 
+import io.github.rochona.notificationsystem.notification.exception.NotificationNotDeletableException;
+import io.github.rochona.notificationsystem.notification.exception.NotificationNotFoundException;
 import io.github.rochona.notificationsystem.tenant.exception.InvalidApiKeyException;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.support.DefaultMessageSourceResolvable;
@@ -22,6 +24,20 @@ public class GlobalExceptionHandler {
         String message = exception.getMessage();
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(message);
+    }
+
+    @ExceptionHandler(NotificationNotFoundException.class)
+    public ResponseEntity<String> handleNotificationNotFoundException(NotificationNotFoundException exception){
+        String  message = exception.getMessage();
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(message);
+    }
+
+    @ExceptionHandler(NotificationNotDeletableException.class)
+    public ResponseEntity<String> handleNotificationNotDeletableException(NotificationNotDeletableException exception){
+        String  message = exception.getMessage();
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(message);
     }
 
 

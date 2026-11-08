@@ -17,6 +17,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry){
         registry.addInterceptor(tenantAuthenticationInterceptor)
-                .addPathPatterns("/notify");
+                .addPathPatterns(
+                        "/notifications",
+                        "/notifications/**"
+                        );
     }
 }
