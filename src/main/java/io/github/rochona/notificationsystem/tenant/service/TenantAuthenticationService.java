@@ -1,6 +1,6 @@
 package io.github.rochona.notificationsystem.tenant.service;
 
-import io.github.rochona.notificationsystem.tenant.ApiKeyHasher;
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyHasher;
 import io.github.rochona.notificationsystem.tenant.exception.InvalidApiKeyException;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import io.github.rochona.notificationsystem.tenant.repository.TenantRepository;

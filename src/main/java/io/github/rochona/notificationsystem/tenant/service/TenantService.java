@@ -1,7 +1,7 @@
 package io.github.rochona.notificationsystem.tenant.service;
 
-import io.github.rochona.notificationsystem.tenant.ApiKeyGenerator;
-import io.github.rochona.notificationsystem.tenant.ApiKeyHasher;
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyGenerator;
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyHasher;
 import io.github.rochona.notificationsystem.tenant.dto.TenantRegistrationResponse;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import io.github.rochona.notificationsystem.tenant.repository.TenantRepository;

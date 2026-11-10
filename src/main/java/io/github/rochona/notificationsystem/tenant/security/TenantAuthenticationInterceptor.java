@@ -1,4 +1,4 @@
-package io.github.rochona.notificationsystem.tenant;
+package io.github.rochona.notificationsystem.tenant.security;
 
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import io.github.rochona.notificationsystem.tenant.service.TenantAuthenticationService;

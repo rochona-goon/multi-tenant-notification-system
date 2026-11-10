@@ -1,6 +1,6 @@
 package io.github.rochona.notificationsystem.tenant.config;
 
-import io.github.rochona.notificationsystem.tenant.TenantAuthenticationInterceptor;
+import io.github.rochona.notificationsystem.tenant.security.TenantAuthenticationInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -19,7 +19,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(tenantAuthenticationInterceptor)
                 .addPathPatterns(
                         "/notifications",
-                        "/notifications/**"
+                        "/notifications/**",
+                        "/templates",
+                        "/templates/**"
                         );
     }
 }

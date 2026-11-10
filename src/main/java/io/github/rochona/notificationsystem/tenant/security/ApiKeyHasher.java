@@ -1,4 +1,4 @@
-package io.github.rochona.notificationsystem.tenant;
+package io.github.rochona.notificationsystem.tenant.security;
 
 import org.springframework.stereotype.Component;
 
