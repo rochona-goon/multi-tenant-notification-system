@@ -1,5 +1,6 @@
 package io.github.rochona.notificationsystem.tenant;
 
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyGenerator;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

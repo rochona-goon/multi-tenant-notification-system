@@ -11,7 +11,7 @@ import java.time.Instant;
 @Setter
 @Entity
 @Table(
-        name = "templates",
+        name = "notification_templates",
         uniqueConstraints = {
                 @UniqueConstraint(
                         name = "uk_template_tenant_name",

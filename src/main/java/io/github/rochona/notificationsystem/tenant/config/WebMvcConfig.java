@@ -21,7 +21,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/notifications",
                         "/notifications/**",
                         "/templates",
-                        "/templates/**"
+                        "/templates/**",
+                        "/preferences",
+                        "/preferences/**"
                         );
     }
 }
