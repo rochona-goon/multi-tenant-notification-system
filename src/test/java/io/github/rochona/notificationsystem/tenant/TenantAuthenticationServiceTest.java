@@ -4,6 +4,7 @@ package io.github.rochona.notificationsystem.tenant;
 import io.github.rochona.notificationsystem.tenant.exception.InvalidApiKeyException;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import io.github.rochona.notificationsystem.tenant.repository.TenantRepository;
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyHasher;
 import io.github.rochona.notificationsystem.tenant.service.TenantAuthenticationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

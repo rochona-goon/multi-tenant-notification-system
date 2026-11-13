@@ -1,5 +1,7 @@
 package io.github.rochona.notificationsystem.tenant;
 
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyGenerator;
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyHasher;
 import org.junit.jupiter.api.Test;
 
 public class TenantKeyMigrationTest {

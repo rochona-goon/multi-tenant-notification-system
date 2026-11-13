@@ -3,6 +3,8 @@ package io.github.rochona.notificationsystem.tenant;
 import io.github.rochona.notificationsystem.tenant.dto.TenantRegistrationResponse;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import io.github.rochona.notificationsystem.tenant.repository.TenantRepository;
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyGenerator;
+import io.github.rochona.notificationsystem.tenant.security.ApiKeyHasher;
 import io.github.rochona.notificationsystem.tenant.service.TenantService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
