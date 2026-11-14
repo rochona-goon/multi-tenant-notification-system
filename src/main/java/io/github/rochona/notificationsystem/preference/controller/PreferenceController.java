@@ -1,5 +1,8 @@
-package io.github.rochona.notificationsystem.preference;
+package io.github.rochona.notificationsystem.preference.controller;
 
+import io.github.rochona.notificationsystem.preference.dto.PreferenceRequestDto;
+import io.github.rochona.notificationsystem.preference.dto.PreferenceResponseDto;
+import io.github.rochona.notificationsystem.preference.service.PreferenceService;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;

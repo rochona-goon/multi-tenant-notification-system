@@ -1,5 +1,11 @@
-package io.github.rochona.notificationsystem.preference;
+package io.github.rochona.notificationsystem.preference.service;
 
+import io.github.rochona.notificationsystem.preference.exception.PreferenceAlreadyExistsException;
+import io.github.rochona.notificationsystem.preference.exception.PreferenceDoesNotExistException;
+import io.github.rochona.notificationsystem.preference.dto.PreferenceRequestDto;
+import io.github.rochona.notificationsystem.preference.dto.PreferenceResponseDto;
+import io.github.rochona.notificationsystem.preference.model.Preference;
+import io.github.rochona.notificationsystem.preference.repository.PreferenceRepository;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.exception.ConstraintViolationException;
@@ -13,7 +19,7 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 @Transactional
-public class PreferenceServiceImpl implements PreferenceService{
+public class PreferenceServiceImpl implements PreferenceService {
 
     private final PreferenceRepository preferenceRepository;
 

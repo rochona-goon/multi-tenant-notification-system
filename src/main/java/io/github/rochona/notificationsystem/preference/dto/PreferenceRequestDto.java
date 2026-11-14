@@ -1,4 +1,4 @@
-package io.github.rochona.notificationsystem.preference;
+package io.github.rochona.notificationsystem.preference.dto;
 
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;

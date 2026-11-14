@@ -1,4 +1,4 @@
-package io.github.rochona.notificationsystem.preference;
+package io.github.rochona.notificationsystem.preference.model;
 
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import jakarta.persistence.*;

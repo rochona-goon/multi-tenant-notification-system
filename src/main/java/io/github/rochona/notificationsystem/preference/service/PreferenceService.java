@@ -1,5 +1,7 @@
-package io.github.rochona.notificationsystem.preference;
+package io.github.rochona.notificationsystem.preference.service;
 
+import io.github.rochona.notificationsystem.preference.dto.PreferenceRequestDto;
+import io.github.rochona.notificationsystem.preference.dto.PreferenceResponseDto;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 
 import java.util.List;
