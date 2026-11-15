@@ -2,8 +2,8 @@ package io.github.rochona.notificationsystem.shared;
 
 import io.github.rochona.notificationsystem.notification.exception.NotificationNotDeletableException;
 import io.github.rochona.notificationsystem.notification.exception.NotificationNotFoundException;
-import io.github.rochona.notificationsystem.preference.PreferenceAlreadyExistsException;
-import io.github.rochona.notificationsystem.preference.PreferenceDoesNotExistException;
+import io.github.rochona.notificationsystem.preference.exception.PreferenceAlreadyExistsException;
+import io.github.rochona.notificationsystem.preference.exception.PreferenceDoesNotExistException;
 import io.github.rochona.notificationsystem.template.exception.TemplateAlreadyActiveException;
 import io.github.rochona.notificationsystem.template.exception.TemplateAlreadyInactiveException;
 import io.github.rochona.notificationsystem.template.exception.TemplateNameAlreadyExistsException;
@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import org.slf4j.Logger;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 
 @RestControllerAdvice
@@ -102,6 +103,13 @@ public class GlobalExceptionHandler {
     return ResponseEntity.badRequest().body(message);
     }
 
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<String> handleMethodArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException exception) {
+
+        return ResponseEntity.badRequest().body(exception.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<String> handleUnexpectedException(Exception exception){
 
@@ -122,5 +130,11 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body("This resource was modified by another request. " + "Please retrieve the latest version and retry.");
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> handleIllegalArgumentException(IllegalArgumentException exception) {
+
+        return ResponseEntity.badRequest().body(exception.getMessage());
     }
 }
