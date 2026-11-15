@@ -14,28 +14,23 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private final TenantAuthenticationInterceptor tenantAuthenticationInterceptor;
     private final RateLimitInterceptor rateLimitInterceptor;
 
+    private static final String[] PROTECTED_PATHS = {
+            "/notifications",
+            "/notifications/**",
+            "/templates",
+            "/templates/**",
+            "/preferences",
+            "/preferences/**"
+    };
+
 
     @Override
     public void addInterceptors(InterceptorRegistry registry){
         registry.addInterceptor(tenantAuthenticationInterceptor)
-                .addPathPatterns(
-                        "/notifications",
-                        "/notifications/**",
-                        "/templates",
-                        "/templates/**",
-                        "/preferences",
-                        "/preferences/**"
-                        );
+                .addPathPatterns(PROTECTED_PATHS);
 
 
         registry.addInterceptor(rateLimitInterceptor)
-                .addPathPatterns(
-                        "/notifications",
-                        "/notifications/**",
-                        "/templates",
-                        "/templates/**",
-                        "/preferences",
-                        "/preferences/**"
-                );
+                .addPathPatterns(PROTECTED_PATHS);
     }
 }

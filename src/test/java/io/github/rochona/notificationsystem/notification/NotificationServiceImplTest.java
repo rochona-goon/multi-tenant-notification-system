@@ -1,6 +1,8 @@
 package io.github.rochona.notificationsystem.notification;
 
+import io.github.rochona.notificationsystem.notification.dto.NotificationRequestDTO;
 import io.github.rochona.notificationsystem.notification.dto.NotificationResponseDTO;
+import io.github.rochona.notificationsystem.notification.enums.NotificationChannel;
 import io.github.rochona.notificationsystem.notification.enums.NotificationStatus;
 import io.github.rochona.notificationsystem.notification.exception.NotificationNotDeletableException;
 import io.github.rochona.notificationsystem.notification.exception.NotificationNotFoundException;
@@ -8,6 +10,11 @@ import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.repository.NotificationRepository;
 import io.github.rochona.notificationsystem.notification.sender.NotificationSender;
 import io.github.rochona.notificationsystem.notification.service.NotificationServiceImpl;
+import io.github.rochona.notificationsystem.preference.service.PreferenceService;
+import io.github.rochona.notificationsystem.template.exception.TemplateNotFoundException;
+import io.github.rochona.notificationsystem.template.model.Template;
+import io.github.rochona.notificationsystem.template.service.TemplateRenderer;
+import io.github.rochona.notificationsystem.template.service.TemplateService;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,8 +25,17 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -35,6 +51,15 @@ public class NotificationServiceImplTest {
     @Mock
     private NotificationSender notificationSender;
 
+    @Mock
+    private TemplateService templateService;
+
+    @Mock
+    private TemplateRenderer templateRenderer;
+
+    @Mock
+    private PreferenceService preferenceService;
+
     @InjectMocks
     private NotificationServiceImpl notificationService;
 
@@ -49,14 +74,18 @@ public class NotificationServiceImplTest {
     }
 
 
+    // ----------- createNotification ------------->
+
+
     @Test
     void shouldSaveAndReturnNotificationWhenEmailIsSent(){
-        Notification savedNotification = new Notification();
-        savedNotification.setId(1L);
-        savedNotification.setSubject("Hi");
-        savedNotification.setMessage("Hi there, how are you doing?");
-        savedNotification.setRecipient("goon.rochona@gmail.com");
-        savedNotification.setStatus(NotificationStatus.PENDING);
+    // Arrange
+
+        when(preferenceService.isChannelEnabled(
+                tenant.getId(),
+                "testuser101",
+                NotificationChannel.EMAIL
+        )).thenReturn(true);
 
         when(notificationRepository.save(any(Notification.class)))
                 .thenAnswer(invocation -> {
@@ -72,14 +101,16 @@ public class NotificationServiceImplTest {
         tenant.setName("Test tenant");
         tenant.setId(1L);
 
+        NotificationRequestDTO request = new NotificationRequestDTO();
+        request.setSubject("Hi");
+        request.setMessage("Hi there, how are you doing?");
+        request.setRecipient("goon.rochona@gmail.com");
+        request.setUserId("testuser101");
+        request.setChannel(NotificationChannel.EMAIL);
+
         // Act
 
-        Notification result = notificationService.createNotification(
-                "Hi",
-                "Hi there, how are you doing?",
-                "goon.rochona@gmail.com",
-                tenant
-        );
+        Notification result = notificationService.createNotification(request, tenant);
 
         // Assert
 
@@ -88,26 +119,100 @@ public class NotificationServiceImplTest {
         assertEquals("Hi", result.getSubject());
         assertEquals("Hi there, how are you doing?", result.getMessage());
         assertEquals("goon.rochona@gmail.com", result.getRecipient());
+        assertEquals("testuser101", result.getUserId());
+        assertEquals(NotificationChannel.EMAIL, result.getChannel());
         assertEquals(NotificationStatus.SENT, result.getStatus());
         assertSame(tenant, result.getTenant());
+        assertNull(result.getHtmlMessage());
 
         InOrder inOrder = inOrder(notificationRepository, notificationSender);
 
         inOrder.verify(notificationRepository).save(any(Notification.class));
         inOrder.verify(notificationSender).send(any(Notification.class));
         inOrder.verify(notificationRepository).save(any(Notification.class));
+        verifyNoInteractions(templateService, templateRenderer);
 
     }
 
 
     @Test
+    void shouldCreateNotificationUsingTemplateSuccessfully() {
+
+        // Arrange
+        Tenant tenant = new Tenant();
+        tenant.setId(1L);
+        tenant.setName("Test tenant");
+
+        Template template = new Template();
+        template.setId(10L);
+        template.setSubject("Hello {{name}}");
+        template.setBodyText("Welcome {{name}}");
+        template.setBodyHtml("<h1>Welcome {{name}}</h1>");
+
+        Map<String, Object> variables = Map.of("name", "Rochona");
+
+        NotificationRequestDTO request = new NotificationRequestDTO();
+        request.setTemplateId(10L);
+        request.setVariables(variables);
+        request.setRecipient("goon.rochona@gmail.com");
+        request.setUserId("testuser101");
+        request.setChannel(NotificationChannel.EMAIL);
+
+        when(preferenceService.isChannelEnabled(
+                tenant.getId(),
+                "testuser101",
+                NotificationChannel.EMAIL
+        )).thenReturn(true);
+
+        when(templateService.getTemplateEntityById(10L, tenant))
+                .thenReturn(template);
+
+        when(templateRenderer.render(template.getSubject(), variables))
+                .thenReturn("Hello Rochona");
+
+        when(templateRenderer.render(template.getBodyText(), variables))
+                .thenReturn("Welcome Rochona");
+
+        when(templateRenderer.render(template.getBodyHtml(), variables))
+                .thenReturn("<h1>Welcome Rochona</h1>");
+
+        when(notificationRepository.save(any(Notification.class)))
+                .thenAnswer(invocation -> {
+                    Notification notification = invocation.getArgument(0);
+
+                    if (notification.getId() == null) {
+                        notification.setId(1L);
+                    }
+
+                    return notification;
+                });
+
+        // Act
+        Notification result = notificationService.createNotification(request, tenant);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals("Hello Rochona", result.getSubject());
+        assertEquals("Welcome Rochona", result.getMessage());
+        assertEquals("<h1>Welcome Rochona</h1>", result.getHtmlMessage());
+        assertEquals("goon.rochona@gmail.com", result.getRecipient());
+        assertEquals("testuser101", result.getUserId());
+        assertEquals(NotificationChannel.EMAIL, result.getChannel());
+        assertEquals(NotificationStatus.SENT, result.getStatus());
+        assertSame(tenant, result.getTenant());
+
+        verify(templateService).getTemplateEntityById(10L, tenant);
+
+        verify(templateRenderer).render(template.getSubject(), variables);
+        verify(templateRenderer).render(template.getBodyText(), variables);
+        verify(templateRenderer).render(template.getBodyHtml(), variables);
+
+        verify(notificationSender).send(any(Notification.class));
+    }
+
+
+    @Test
     void shouldMarkNotificationAsFailedWhenEmailIsSendingFails(){
-        Notification savedNotification = new Notification();
-        savedNotification.setId(1L);
-        savedNotification.setSubject("Hi");
-        savedNotification.setMessage("Hi there, how are you doing?");
-        savedNotification.setRecipient("goon.rochona@gmail.com");
-        savedNotification.setStatus(NotificationStatus.PENDING);
 
         when(notificationRepository.save(any(Notification.class)))
                 .thenAnswer(invocation -> {
@@ -118,6 +223,12 @@ public class NotificationServiceImplTest {
 
                     return notification;
                 });
+
+        when(preferenceService.isChannelEnabled(
+                tenant.getId(),
+                "testuser101",
+                NotificationChannel.EMAIL
+        )).thenReturn(true);
 
         doThrow(new RuntimeException("Email Delivery Failed"))
                 .when(notificationSender)
@@ -127,28 +238,176 @@ public class NotificationServiceImplTest {
         tenant.setName("Test tenant");
         tenant.setId(1L);
 
+        NotificationRequestDTO request = new NotificationRequestDTO();
+        request.setSubject("Hi");
+        request.setMessage("Hi there, how are you doing?");
+        request.setRecipient("goon.rochona@gmail.com");
+        request.setUserId("testuser101");
+        request.setChannel(NotificationChannel.EMAIL);
+
         // Act
 
-        Notification result = notificationService.createNotification(
-                "Hello",
-                "Hello there, how are you doing?",
-                "goon.rochona@gmail.com",
-                tenant
-        );
+        Notification result = notificationService.createNotification(request, tenant);
 
         // Assert
 
         assertNotNull(result);
         assertEquals(NotificationStatus.FAILED, result.getStatus());
+        assertEquals("Hi", result.getSubject());
+        assertEquals("Hi there, how are you doing?", result.getMessage());
 
         InOrder inOrder = inOrder(notificationRepository, notificationSender);
 
         inOrder.verify(notificationRepository).save(any(Notification.class));
         inOrder.verify(notificationSender).send(any(Notification.class));
         inOrder.verify(notificationRepository).save(any(Notification.class));
+        verifyNoInteractions(templateService, templateRenderer);
 
     }
 
+
+    @Test
+    void shouldNotCreateNotificationWhenTemplateDoesNotExist() {
+
+        // Arrange
+        NotificationRequestDTO request = new NotificationRequestDTO();
+        request.setTemplateId(10L);
+        request.setVariables(Map.of("name", "Rochona"));
+        request.setRecipient("goon.rochona@gmail.com");
+        request.setChannel(NotificationChannel.EMAIL);
+
+        when(templateService.getTemplateEntityById(10L, tenant))
+                .thenThrow(new TemplateNotFoundException("Template not found"));
+
+        // Act & Assert
+        assertThrows(
+                TemplateNotFoundException.class,
+                () -> notificationService.createNotification(request, tenant)
+        );
+
+        verify(templateService).getTemplateEntityById(10L, tenant);
+        verifyNoInteractions(templateRenderer, notificationSender);
+        verify(notificationRepository, never()).save(any(Notification.class));
+    }
+
+
+    @Test
+    void shouldNotCreateNotificationWhenTemplateRenderingFails() {
+
+        // Arrange
+        Map<String, Object> variables = Map.of("name", "Rochona");
+
+        Template template = new Template();
+        template.setId(10L);
+        template.setSubject("Hello {{name}}");
+        template.setBodyText("Welcome {{name}}");
+        template.setBodyHtml("<h1>Welcome {{name}}</h1>");
+
+        NotificationRequestDTO request = new NotificationRequestDTO();
+        request.setTemplateId(10L);
+        request.setVariables(variables);
+        request.setRecipient("goon.rochona@gmail.com");
+        request.setChannel(NotificationChannel.EMAIL);
+
+        when(templateService.getTemplateEntityById(10L, tenant))
+                .thenReturn(template);
+
+        when(templateRenderer.render(template.getSubject(), variables))
+                .thenThrow(new IllegalArgumentException("Missing template variable: name"));
+
+        // Act & Assert
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> notificationService.createNotification(request, tenant)
+        );
+
+        verify(templateService).getTemplateEntityById(10L, tenant);
+        verify(templateRenderer).render(template.getSubject(), variables);
+
+        verify(notificationRepository, never()).save(any(Notification.class));
+        verifyNoInteractions(notificationSender);
+    }
+
+
+    @Test
+    void shouldSuppressNotificationWhenChannelIsDisabled() {
+
+        // Arrange
+        NotificationRequestDTO request = new NotificationRequestDTO();
+        request.setSubject("Hi");
+        request.setMessage("Hi there");
+        request.setRecipient("test@gmail.com");
+        request.setUserId("testuser101");
+        request.setChannel(NotificationChannel.EMAIL);
+
+        when(preferenceService.isChannelEnabled(
+                tenant.getId(),
+                "testuser101",
+                NotificationChannel.EMAIL
+        )).thenReturn(false);
+
+        when(notificationRepository.save(any(Notification.class)))
+                .thenAnswer(invocation -> {
+                    Notification notification = invocation.getArgument(0);
+                    notification.setId(1L);
+                    return notification;
+                });
+
+        // Act
+        Notification result = notificationService.createNotification(request, tenant);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(NotificationStatus.SUPPRESSED, result.getStatus());
+
+        verify(preferenceService).isChannelEnabled(
+                tenant.getId(),
+                "testuser101",
+                NotificationChannel.EMAIL
+        );
+
+        verify(notificationRepository).save(any(Notification.class));
+        verifyNoInteractions(notificationSender);
+    }
+
+
+    @Test
+    void shouldSendNotificationWhenUserIdIsAbsent() {
+
+        // Arrange
+        NotificationRequestDTO request = new NotificationRequestDTO();
+        request.setSubject("Hi");
+        request.setMessage("Hello there");
+        request.setRecipient("test@gmail.com");
+        request.setChannel(NotificationChannel.EMAIL);
+        // Deliberately leave userId null
+
+        when(notificationRepository.save(any(Notification.class)))
+                .thenAnswer(invocation -> {
+                    Notification notification = invocation.getArgument(0);
+
+                    if (notification.getId() == null) {
+                        notification.setId(1L);
+                    }
+
+                    return notification;
+                });
+
+        // Act
+        Notification result = notificationService.createNotification(request, tenant);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(NotificationStatus.SENT, result.getStatus());
+        assertNull(result.getUserId());
+
+        verifyNoInteractions(preferenceService);
+        verify(notificationSender).send(any(Notification.class));
+        verify(notificationRepository, times(2)).save(any(Notification.class));
+    }
+
+
+    // ------------ getAllNotifications ------------->
 
     @Test
     void shouldReturnAllNotificationsForTenants(){
@@ -158,6 +417,8 @@ public class NotificationServiceImplTest {
         response1.setSubject("Test Subject 1");
         response1.setMessage("Test Message 1");
         response1.setRecipient("testrecipient@gmail.com");
+        response1.setUserId("testuser101");
+        response1.setChannel(NotificationChannel.EMAIL);
         response1.setStatus(NotificationStatus.PENDING);
         response1.setTenant(tenant);
 
@@ -166,34 +427,50 @@ public class NotificationServiceImplTest {
         response2.setSubject("Test Subject 2");
         response2.setMessage("Test Message 2");
         response2.setRecipient("testrecipient@gmail.com");
+        response2.setUserId(null);
+        response2.setChannel(NotificationChannel.EMAIL);
         response2.setStatus(NotificationStatus.PENDING);
         response2.setTenant(tenant);
 
+        Pageable pageable = PageRequest.of(0, 20);
 
-        when(notificationRepository.findAllByTenant(any(Tenant.class)))
-                .thenReturn(List.of(response1, response2));
+        Page<Notification> responsePage = new PageImpl<>(List.of(response1, response2), pageable, 2);
+
+
+        when(notificationRepository.findAll(any(Specification.class), eq(pageable)))
+                .thenReturn(responsePage);
 
         // Act
 
-        List<NotificationResponseDTO> result = notificationService.getAllNotifications(tenant);
-
+        Page<NotificationResponseDTO> result = notificationService.getAllNotifications(tenant, null, null, null, null, null, pageable);
         // Assert
 
-        assertEquals(2, result.size());
+        assertEquals(2, result.getContent().size());
 
-        assertEquals(1L, result.get(0).getId());
-        assertEquals("Test Subject 1", result.get(0).getSubject());
-        assertEquals("testrecipient@gmail.com", result.get(0).getRecipient());
-        assertEquals("Test Message 1", result.get(0).getMessage());
-        assertEquals(NotificationStatus.PENDING, result.get(0).getNotificationStatus());
+        assertEquals(1L, result.getContent().get(0).getId());
+        assertEquals("Test Subject 1", result.getContent().get(0).getSubject());
+        assertEquals("testrecipient@gmail.com", result.getContent().get(0).getRecipient());
+        assertEquals("Test Message 1", result.getContent().get(0).getMessage());
+        assertEquals("testuser101", result.getContent().get(0).getUserId());
+        assertEquals(NotificationChannel.EMAIL, result.getContent().get(0).getChannel());
+        assertEquals(NotificationStatus.PENDING, result.getContent().get(0).getNotificationStatus());
 
-        assertEquals(2L, result.get(1).getId());
-        assertEquals("Test Subject 2", result.get(1).getSubject());
-        assertEquals("testrecipient@gmail.com", result.get(1).getRecipient());
-        assertEquals("Test Message 2", result.get(1).getMessage());
-        assertEquals(NotificationStatus.PENDING, result.get(1).getNotificationStatus());
+        assertEquals(2L, result.getContent().get(1).getId());
+        assertEquals("Test Subject 2", result.getContent().get(1).getSubject());
+        assertEquals("testrecipient@gmail.com", result.getContent().get(1).getRecipient());
+        assertEquals("Test Message 2", result.getContent().get(1).getMessage());
+        assertNull(result.getContent().get(1).getUserId());
+        assertEquals(NotificationChannel.EMAIL, result.getContent().get(1).getChannel());
+        assertEquals(NotificationStatus.PENDING, result.getContent().get(1).getNotificationStatus());
 
-        verify(notificationRepository).findAllByTenant(tenant);
+        assertEquals(0, result.getNumber());
+        assertEquals(20, result.getSize());
+        assertEquals(2, result.getTotalElements());
+        assertEquals(1, result.getTotalPages());
+        assertFalse(result.hasNext());
+        assertFalse(result.hasPrevious());
+
+        verify(notificationRepository).findAll(any(Specification.class), eq(pageable));
 
     }
 
@@ -201,25 +478,38 @@ public class NotificationServiceImplTest {
     @Test
     void shouldReturnEmptyListWhenTenantHasNoNotifications(){
 
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Page<Notification> responsePage = new PageImpl<>(List.of(), pageable, 0);
+
         // Arrange
 
-        when(notificationRepository.findAllByTenant(tenant))
-                .thenReturn(List.of());
+        when(notificationRepository.findAll(any(Specification.class), eq(pageable)))
+                .thenReturn(responsePage);
 
         // Act
 
-        List<NotificationResponseDTO> result = notificationService.getAllNotifications(tenant);
+        Page<NotificationResponseDTO> result = notificationService.getAllNotifications(tenant, null, null, null, null, null, pageable);
 
         // Assert
 
         assertNotNull(result);
-        assertEquals(0, result.size());
+        assertEquals(0, result.getContent().size());
+        assertEquals(0, result.getNumber());
+        assertEquals(20, result.getSize());
+        assertEquals(0, result.getTotalElements());
+        assertEquals(0, result.getTotalPages());
+        assertFalse(result.hasNext());
+        assertFalse(result.hasPrevious());
 
 
         // verify the call
-        verify(notificationRepository).findAllByTenant(tenant);
+        verify(notificationRepository).findAll(any(Specification.class), eq(pageable));
     }
 
+
+
+    // ------------- getNotificationById ------------->
 
     @Test
     void shouldReturnNotificationWhenIdAndTenantMatch(){
@@ -231,6 +521,8 @@ public class NotificationServiceImplTest {
         response.setSubject("Test Subject");
         response.setMessage("Test Message");
         response.setRecipient("goon.rochona@gmail.com");
+        response.setUserId("testuser101");
+        response.setChannel(NotificationChannel.EMAIL);
         response.setStatus(NotificationStatus.PENDING);
         response.setTenant(tenant);
 
@@ -249,6 +541,8 @@ public class NotificationServiceImplTest {
         assertEquals("Test Subject", result.getSubject());
         assertEquals("Test Message", result.getMessage());
         assertEquals("goon.rochona@gmail.com", result.getRecipient());
+        assertEquals("testuser101", result.getUserId());
+        assertEquals(NotificationChannel.EMAIL, result.getChannel());
         assertEquals(NotificationStatus.PENDING, result.getNotificationStatus());
 
 
@@ -280,7 +574,11 @@ public class NotificationServiceImplTest {
     }
 
 
-    @Test
+
+    // ------------- deleteNotificationById ----------->
+
+
+    @Test // Need to make this idempotent
     void shouldDeleteAPendingNotificationSuccessfully(){
 
         // Arrange
@@ -290,6 +588,8 @@ public class NotificationServiceImplTest {
         notification.setSubject("Test Subject");
         notification.setMessage("Test Message");
         notification.setRecipient("testrecipient@gmail.com");
+        notification.setUserId("testuser101");
+        notification.setChannel(NotificationChannel.EMAIL);
         notification.setStatus(NotificationStatus.PENDING);
         notification.setTenant(tenant);
 
@@ -331,6 +631,8 @@ public class NotificationServiceImplTest {
         notification.setSubject("Test Subject");
         notification.setMessage("Test Message");
         notification.setRecipient("testrecipient@gmail.com");
+        notification.setUserId("testuser101");
+        notification.setChannel(NotificationChannel.EMAIL);
         notification.setStatus(status);
         notification.setTenant(tenant);
 
@@ -353,41 +655,6 @@ public class NotificationServiceImplTest {
         verify(notificationRepository, never())
                 .deleteByIdAndTenantAndStatus(1L, tenant, NotificationStatus.PENDING);
 
-    }
-
-
-
-    @Test
-    void shouldThrowExceptionWhenDeletingNotificationOfAnotherTenantRepoLevel(){
-        Notification notification = new Notification();
-        notification.setId(1L);
-        notification.setSubject("Test Subject");
-        notification.setMessage("Test Message");
-        notification.setRecipient("testrecipient@gmail.com");
-        notification.setStatus(NotificationStatus.PENDING);
-        notification.setTenant(tenant);
-
-        Tenant tenant1 = new Tenant();
-        tenant1.setName("Another Tenant");
-        tenant1.setId(2L);
-
-        when(notificationRepository.findByIdAndTenant(1L, tenant1))
-                .thenReturn(Optional.of(notification));
-
-        when(notificationRepository.deleteByIdAndTenantAndStatus(1L, tenant1, NotificationStatus.PENDING))
-                .thenThrow(new NotificationNotDeletableException("Notification does not belong to this tenant"));
-
-
-        // Act & Assert
-
-        assertThrows(
-                NotificationNotDeletableException.class,
-                () -> notificationService.deleteNotificationById(1L, tenant1)
-        );
-
-
-        // verify the call
-        verify(notificationRepository).deleteByIdAndTenantAndStatus(1L, tenant1, NotificationStatus.PENDING);
     }
 
 
@@ -415,6 +682,191 @@ public class NotificationServiceImplTest {
         verify(notificationRepository, never()).deleteByIdAndTenantAndStatus(1L, tenant1, NotificationStatus.PENDING);
 
     }
+
+
+    @Test
+    void shouldThrowExceptionWhenPendingNotificationCannotBeDeleted() {
+
+        Notification notification = new Notification();
+        notification.setId(1L);
+        notification.setStatus(NotificationStatus.PENDING);
+        notification.setTenant(tenant);
+
+        when(notificationRepository.findByIdAndTenant(1L, tenant))
+                .thenReturn(Optional.of(notification));
+
+        when(notificationRepository.deleteByIdAndTenantAndStatus(
+                1L, tenant, NotificationStatus.PENDING
+        )).thenReturn(false);
+
+        assertThrows(
+                NotificationNotDeletableException.class,
+                () -> notificationService.deleteNotificationById(1L, tenant)
+        );
+
+        verify(notificationRepository).findByIdAndTenant(1L, tenant);
+        verify(notificationRepository).deleteByIdAndTenantAndStatus(
+                1L, tenant, NotificationStatus.PENDING
+        );
+    }
+
+    // ------------ Pagination & Filtering ---------------->
+    @Test
+    void shouldReturnSecondPageOfNotifications() {
+
+        // Arrange
+
+        Pageable pageable = PageRequest.of(1, 2);
+
+        Notification notification = new Notification();
+        notification.setId(3L);
+        notification.setSubject("Test Subject 3");
+        notification.setMessage("Test Message 3");
+        notification.setRecipient("testrecipient@gmail.com");
+        notification.setChannel(NotificationChannel.EMAIL);
+        notification.setStatus(NotificationStatus.PENDING);
+        notification.setTenant(tenant);
+
+        Page<Notification> responsePage =
+                new PageImpl<>(List.of(notification), pageable, 3);
+
+        when(notificationRepository.findAll(any(Specification.class), eq(pageable)))
+                .thenReturn(responsePage);
+
+        // Act
+
+        Page<NotificationResponseDTO> result =
+                notificationService.getAllNotifications(tenant, null, null, null, null, null, pageable);
+
+
+        // Assert
+
+        assertEquals(1, result.getContent().size());
+        assertEquals(3L, result.getContent().get(0).getId());
+        assertEquals(1, result.getNumber());
+        assertEquals(2, result.getSize());
+        assertEquals(3, result.getTotalElements());
+        assertEquals(2, result.getTotalPages());
+        assertFalse(result.hasNext());
+        assertTrue(result.hasPrevious());
+
+
+        // Verify
+        verify(notificationRepository).findAll(any(Specification.class), eq(pageable));
+    }
+
+
+    @Test
+    void shouldFilterNotificationsByStatus() {
+
+        // Arrange
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Notification notification = new Notification();
+        notification.setId(1L);
+        notification.setSubject("Failed notification");
+        notification.setMessage("Test message");
+        notification.setRecipient("testrecipient@gmail.com");
+        notification.setChannel(NotificationChannel.EMAIL);
+        notification.setStatus(NotificationStatus.FAILED);
+        notification.setTenant(tenant);
+
+        Page<Notification> responsePage =
+                new PageImpl<>(List.of(notification), pageable, 1);
+
+        when(notificationRepository.findAll(
+                any(Specification.class),
+                eq(pageable)
+        )).thenReturn(responsePage);
+
+        // Act
+        Page<NotificationResponseDTO> result =
+                notificationService.getAllNotifications(
+                        tenant, NotificationStatus.FAILED, null, null, null, null, pageable);
+
+        // Assert
+        assertEquals(1, result.getContent().size());
+        assertEquals(
+                NotificationStatus.FAILED,
+                result.getContent().get(0).getNotificationStatus()
+        );
+
+        verify(notificationRepository).findAll(
+                any(Specification.class),
+                eq(pageable)
+        );
+    }
+
+
+    @Test
+    void shouldFilterNotificationsByChannel() {
+
+        // Arrange
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Notification notification = new Notification();
+        notification.setId(1L);
+        notification.setSubject("Failed notification");
+        notification.setMessage("Test message");
+        notification.setRecipient("testrecipient@gmail.com");
+        notification.setChannel(NotificationChannel.EMAIL);
+        notification.setStatus(NotificationStatus.FAILED);
+        notification.setTenant(tenant);
+
+        Page<Notification> responsePage =
+                new PageImpl<>(List.of(notification), pageable, 1);
+
+        when(notificationRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(responsePage);
+
+        // Act
+        Page<NotificationResponseDTO> result =
+                notificationService.getAllNotifications(
+                        tenant, null, NotificationChannel.EMAIL, null, null, null, pageable);
+
+        // Assert
+        assertEquals(1, result.getContent().size());
+        assertEquals(NotificationChannel.EMAIL, result.getContent().get(0).getChannel());
+
+        verify(notificationRepository).findAll(any(Specification.class), eq(pageable));
+    }
+
+
+
+    @Test
+    void shouldFilterNotificationsByUserId() {
+
+        // Arrange
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Notification notification = new Notification();
+        notification.setId(1L);
+        notification.setSubject("Failed notification");
+        notification.setMessage("Test message");
+        notification.setRecipient("testrecipient@gmail.com");
+        notification.setChannel(NotificationChannel.EMAIL);
+        notification.setStatus(NotificationStatus.FAILED);
+        notification.setTenant(tenant);
+        notification.setUserId("testuser101");
+
+        Page<Notification> responsePage =
+                new PageImpl<>(List.of(notification), pageable, 1);
+
+        when(notificationRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(responsePage);
+
+        // Act
+        Page<NotificationResponseDTO> result =
+                notificationService.getAllNotifications(
+                        tenant, null, null, "testuser101", null, null, pageable);
+
+        // Assert
+        assertEquals(1, result.getContent().size());
+        assertEquals("testuser101", result.getContent().get(0).getUserId());
+
+        verify(notificationRepository).findAll(any(Specification.class), eq(pageable));
+    }
+
+
+
 }
 
 
