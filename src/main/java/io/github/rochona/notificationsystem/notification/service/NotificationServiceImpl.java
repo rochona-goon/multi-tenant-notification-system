@@ -10,6 +10,7 @@ import io.github.rochona.notificationsystem.notification.repository.Notification
 import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.sender.NotificationSender;
 import io.github.rochona.notificationsystem.notification.specification.NotificationSpecification;
+import io.github.rochona.notificationsystem.preference.service.PreferenceService;
 import io.github.rochona.notificationsystem.template.model.Template;
 import io.github.rochona.notificationsystem.template.service.TemplateRenderer;
 import io.github.rochona.notificationsystem.template.service.TemplateService;
@@ -33,6 +34,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final NotificationSender notificationSender;
     private final TemplateService templateService;
     private final TemplateRenderer templateRenderer;
+    private final PreferenceService preferenceService;
 
 
     @Override
@@ -77,6 +79,18 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setUserId(request.getUserId());
         notification.setTenant(tenant);
 
+        if (request.getUserId() != null && !request.getUserId().isBlank() &&
+        !preferenceService.isChannelEnabled(
+                        tenant.getId(),
+                        request.getUserId(),
+                        request.getChannel()
+                )) {
+
+            notification.setStatus(NotificationStatus.SUPPRESSED);
+
+            return notificationRepository.save(notification);
+        }
+
         Notification savedNotification = notificationRepository.save(notification);
 
         try{
@@ -96,38 +110,38 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public Page<NotificationResponseDTO> getAllNotifications(Tenant tenant, NotificationStatus status,
-                                                             NotificationChannel channel, String userId,
-                                                             LocalDate fromDate, LocalDate toDate,
-                                                             Pageable pageable) {
+                                                                 NotificationChannel channel, String userId,
+                                                                 LocalDate fromDate, LocalDate toDate,
+                                                                 Pageable pageable) {
 
-        Specification<Notification> specification = NotificationSpecification.belongsToTenant(tenant.getId());
+            Specification<Notification> specification = NotificationSpecification.belongsToTenant(tenant.getId());
 
-        if(status != null){
-            specification = specification.and(NotificationSpecification.hasStatus(status));
+            if(status != null){
+                specification = specification.and(NotificationSpecification.hasStatus(status));
+            }
+
+            if(channel != null){
+                specification = specification.and(NotificationSpecification.hasChannel(channel));
+            }
+
+            if(userId != null){
+                specification = specification.and(NotificationSpecification.hasUserId(userId));
+            }
+
+            if (fromDate != null) {
+                specification = specification.and(
+                        NotificationSpecification.createdFrom(fromDate)
+                );
+            }
+
+            if (toDate != null) {
+                specification = specification.and(
+                        NotificationSpecification.createdUntil(toDate)
+                );
+            }
+
+            return notificationRepository.findAll(specification, pageable).map(this::toResponseDTO);
         }
-
-        if(channel != null){
-            specification = specification.and(NotificationSpecification.hasChannel(channel));
-        }
-
-        if(userId != null){
-            specification = specification.and(NotificationSpecification.hasUserId(userId));
-        }
-
-        if (fromDate != null) {
-            specification = specification.and(
-                    NotificationSpecification.createdFrom(fromDate)
-            );
-        }
-
-        if (toDate != null) {
-            specification = specification.and(
-                    NotificationSpecification.createdUntil(toDate)
-            );
-        }
-
-        return notificationRepository.findAll(specification, pageable).map(this::toResponseDTO);
-    }
 
     @Override
     public NotificationResponseDTO getNotificationById(Long id, Tenant tenant) {
@@ -163,6 +177,7 @@ public class NotificationServiceImpl implements NotificationService {
         response.setMessage(notification.getMessage());
         response.setChannel(notification.getChannel());
         response.setUserId(notification.getUserId());
+        response.setHtmlMessage(notification.getHtmlMessage());
         response.setNotificationStatus(notification.getStatus());
 
         return response;
