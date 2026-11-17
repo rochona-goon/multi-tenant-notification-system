@@ -1,66 +1,159 @@
-# Phase 4 - Notification Preferences
+# Preferences Module
 
-## Overview
+## 1. Overview
 
-The Notification Preferences module allows tenants to manage their end users' notification channel preferences.
+The Preferences module manages notification channel preferences for end users within each tenant.
 
-Each tenant can configure whether a particular user should receive notifications through Email, SMS, and Push channels.
+It allows tenants to create, retrieve, update, list, and delete notification preferences for their users.
 
-The module follows a tenant-scoped design, ensuring that one tenant cannot access or modify another tenant's users' preferences.
+Each preference record controls whether the following notification channels are enabled:
 
-## Key Features
+- Email
+- SMS
+- Push notifications
 
-- **Tenant-scoped preferences:** Each preference record belongs to a tenant.
-- **External User ID:** Uses a tenant-provided `userId` instead of maintaining a central user-management system.
-- **Channel-level preferences:** Users can independently enable or disable Email, SMS, and Push notifications.
-- **Create or update:** Uses PUT to create a preference record or replace an existing one.
-- **Preference retrieval:** Retrieve an individual user's preferences or list all preferences belonging to a tenant.
-- **Preference deletion:** Delete a user's preference record without affecting notification history.
-- **Input validation:** Validates required channel settings and user IDs.
-- **Optimistic locking:** Uses JPA's `@Version` to prevent lost updates during concurrent modifications.
-- **Database uniqueness:** Enforces one preference record per tenant and user combination.
+The module is tenant-scoped. A tenant can manage preferences only for users belonging to its own application context.
 
-## Data Model
+The notification system does not maintain central user profiles. Instead, it uses an external `userId` supplied by the tenant. This allows tenants to use their own user identifiers, including UUIDs and other identifier formats.
 
-### Preference Entity
+### Key Features
 
-The `Preference` entity is mapped to the `notification_preferences` table.
+- Tenant-scoped notification preferences.
+- Create or update preferences using a single PUT endpoint.
+- Retrieve preferences for an individual user.
+- Retrieve all preferences belonging to a tenant.
+- Pagination and filtering by user ID.
+- Delete preferences for an individual user.
+- Independent control over Email, SMS, and Push channels.
+- Database-level uniqueness for tenant and user combinations.
+- Transactional service operations.
+- Handling of concurrent preference creation conflicts.
 
-| Field | Description |
-|---|---|
-| `id` | Primary key |
-| `tenant` | Associated tenant (mandatory relationship) |
-| `userId` | Tenant-provided external user identifier (maximum 100 characters) |
-| `emailEnabled` | Whether Email notifications are enabled |
-| `smsEnabled` | Whether SMS notifications are enabled |
-| `pushEnabled` | Whether Push notifications are enabled |
-| `createdAt` | Record creation timestamp |
-| `updatedAt` | Last modification timestamp |
-| `version` | Optimistic locking version |
+## 2. Package Structure
 
-### Database Constraints
+```text
+preference/
+├── controller/
+│   └── PreferenceController
+│
+├── dto/
+│   ├── PreferenceRequestDto
+│   └── PreferenceResponseDto
+│
+├── exception/
+│   ├── PreferenceAlreadyExistsException
+│   └── PreferenceDoesNotExistException
+│
+├── model/
+│   └── Preference
+│
+├── repository/
+│   └── PreferenceRepository
+│
+├── service/
+│   ├── PreferenceService
+│   └── PreferenceServiceImpl
+│
+└── specification/
+    └── PreferenceSpecification
+```
 
-- Unique constraint on `(tenant_id, user_id)`.
-- All three channel preferences are independently configurable.
-- All channel preferences can be disabled simultaneously.
-- The `userId` is stored as a string to support different identifier formats, including UUIDs.
+### Package Responsibilities
 
-## API Endpoints
+| Package         | Responsibility                                             |
+| --------------- | ---------------------------------------------------------- |
+| `controller`    | Exposes REST endpoints for preference management.          |
+| `dto`           | Defines preference request and response structures.        |
+| `exception`     | Contains preference-specific business exceptions.          |
+| `model`         | Contains the Preference persistence entity.                |
+| `repository`    | Handles preference database operations.                    |
+| `service`       | Implements preference management and business logic.       |
+| `specification` | Builds dynamic database queries for filtering preferences. |
 
-All endpoints require tenant API-key authentication through the `X-API-KEY` header.
+## 3. Preference Data Structure
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `PUT` | `/preferences/{userId}` | Create or update user preferences |
-| `GET` | `/preferences/{userId}` | Retrieve preferences for a user |
-| `GET` | `/preferences` | Retrieve all preferences for the authenticated tenant |
-| `DELETE` | `/preferences/{userId}` | Delete a user's preference record |
+A preference record represents the notification channel settings for one user within one tenant.
 
-### 1. Create or Update Preferences
+The following fields are exposed through the response DTO:
 
-**Request**
+| Field          | Type    | Description                                            |
+| -------------- | ------- | ------------------------------------------------------ |
+| `userId`       | String  | Tenant-provided external user identifier.              |
+| `emailEnabled` | Boolean | Whether email notifications are enabled.               |
+| `smsEnabled`   | Boolean | Whether SMS notifications are enabled.                 |
+| `pushEnabled`  | Boolean | Whether push notifications are enabled.                |
+| `createdAt`    | Instant | Timestamp when the preference record was created.      |
+| `updatedAt`    | Instant | Timestamp when the preference record was last updated. |
 
-`PUT /preferences/{userId}`
+The tenant association and internal persistence details are not exposed through the response DTO.
+
+### Request DTO
+
+`PreferenceRequestDto` accepts three fields:
+
+| Field          | Type    | Validation            |
+| -------------- | ------- | --------------------- |
+| `emailEnabled` | Boolean | Required (`@NotNull`) |
+| `smsEnabled`   | Boolean | Required (`@NotNull`) |
+| `pushEnabled`  | Boolean | Required (`@NotNull`) |
+
+All three values must be supplied in every request.
+
+A value of `false` is valid. Therefore, tenants can disable all three notification channels simultaneously.
+
+### Response DTO
+
+`PreferenceResponseDto` contains:
+
+- User ID.
+- Email preference.
+- SMS preference.
+- Push preference.
+- Creation timestamp.
+- Last updated timestamp.
+
+It does not expose the tenant ID or internal database identifier.
+
+## 4. API Endpoints
+
+All preference endpoints use the following base path:
+
+`/preferences`
+
+Every endpoint operates in the context of the authenticated tenant.
+
+The tenant is obtained from the request attribute:
+
+`authenticatedTenant`
+
+### 4.1 Create or Update Preference
+
+**Endpoint:** `PUT /preferences/{userId}`
+
+**Description:**
+
+Creates a new preference record or updates an existing record for the specified user.
+
+This endpoint implements upsert behavior.
+
+The service performs the following operations:
+
+1. Searches for an existing preference using the tenant ID and user ID.
+2. If a record exists, retrieves it for updating.
+3. If no record exists, creates a new Preference entity and associates it with the authenticated tenant and supplied user ID.
+4. Updates all three channel preference values.
+5. Saves and flushes the entity.
+6. Returns the resulting preference as `PreferenceResponseDto`.
+
+This is a full-replacement operation: all three channel preferences must be supplied in the request.
+
+**Path Parameter:**
+
+| Parameter | Type   | Validation                                 |
+| --------- | ------ | ------------------------------------------ |
+| `userId`  | String | Must not be blank; maximum 100 characters. |
+
+**Request Body:**
 
 ```json
 {
@@ -70,146 +163,374 @@ All endpoints require tenant API-key authentication through the `X-API-KEY` head
 }
 ```
 
-**Behavior**
+**Response:** `200 OK`
 
-- Creates a new preference record if one does not exist.
-- Updates the existing record if one already exists.
-- Performs a full replacement of the three channel preference values.
-- Requires all three fields; missing or null values fail validation.
+```json
+{
+  "userId": "user-1001",
+  "emailEnabled": true,
+  "smsEnabled": false,
+  "pushEnabled": true,
+  "createdAt": "2026-11-15T10:30:00Z",
+  "updatedAt": "2026-11-15T10:30:00Z"
+}
+```
 
-### 2. Get User Preferences
+The timestamps above are illustrative.
 
-**Request**
+### 4.2 Get Preference by User ID
 
-`GET /preferences/{userId}`
+**Endpoint:** `GET /preferences/{userId}`
 
-Returns the preference record belonging to the authenticated tenant and supplied user ID.
+**Description:**
 
-If no record exists, the API returns `404 Not Found`.
+Retrieves the notification preferences for a particular user within the authenticated tenant.
 
-### 3. Get All Preferences
+The service searches using both:
 
-**Request**
+- Tenant ID.
+- User ID.
 
-`GET /preferences`
+If no matching preference exists, the service throws `PreferenceDoesNotExistException`.
 
-Returns all stored preference records belonging to the authenticated tenant.
+**Path Parameter:**
 
-If no records exist, the API returns an empty list.
+| Parameter | Type   | Validation                                 |
+| --------- | ------ | ------------------------------------------ |
+| `userId`  | String | Must not be blank; maximum 100 characters. |
 
-### 4. Delete User Preferences
+**Response:** `200 OK`
 
-**Request**
+```json
+{
+  "userId": "user-1001",
+  "emailEnabled": true,
+  "smsEnabled": false,
+  "pushEnabled": true,
+  "createdAt": "2026-11-15T10:30:00Z",
+  "updatedAt": "2026-11-15T10:30:00Z"
+}
+```
 
-`DELETE /preferences/{userId}`
+### 4.3 Get All Preferences
 
-Deletes the preference record belonging to the authenticated tenant and supplied user ID.
+**Endpoint:** `GET /preferences`
 
-**Behavior**
+**Description:**
 
-- Returns `204 No Content`.
-- Deletion is idempotent: the response remains `204` even if the record does not exist.
-- Does not delete notification history.
+Retrieves preferences belonging to the authenticated tenant.
 
-## Tenant Isolation and Security
+The endpoint supports pagination and optional filtering by user ID.
 
-Tenant identity is derived exclusively from the authenticated API key.
+**Query Parameters:**
 
-The tenant is retrieved from the `authenticatedTenant` request attribute populated by the tenant authentication interceptor.
+| Parameter | Type    | Required | Default | Description                          |
+| --------- | ------- | -------- | ------- | ------------------------------------ |
+| `page`    | Integer | No       | `0`     | Zero-based page number.              |
+| `size`    | Integer | No       | `20`    | Number of records per page.          |
+| `userId`  | String  | No       | None    | Filters results by an exact user ID. |
 
-The tenant ID is never accepted from the request body or query parameters.
+Results are sorted by `createdAt` in descending order.
 
-All preference retrieval, update, and deletion operations are scoped by both tenant ID and external user ID.
+**Example Request:**
 
-This prevents cross-tenant access to preference records.
+```http
+GET /preferences?page=0&size=10
+```
 
-## Default Preference Behavior
+**Example with User ID Filter:**
 
-The system does not automatically create preference records for every user.
+```http
+GET /preferences?page=0&size=10&userId=user-1001
+```
 
-If a notification is associated with a `userId` but no preference record exists, the delivery behavior defaults to all channels enabled.
+**Response:** `200 OK`
 
-If a notification does not contain a `userId`, preference checks are not applicable.
+The endpoint returns a Spring Data `Page` of `PreferenceResponseDto` objects.
 
-Retrieving a nonexistent preference through the GET endpoint still returns `404 Not Found`.
+```json
+{
+  "content": [
+    {
+      "userId": "user-1001",
+      "emailEnabled": true,
+      "smsEnabled": false,
+      "pushEnabled": true,
+      "createdAt": "2026-11-15T10:30:00Z",
+      "updatedAt": "2026-11-15T10:30:00Z"
+    }
+  ],
+  "pageable": {
+    "pageNumber": 0,
+    "pageSize": 10
+  },
+  "totalElements": 1,
+  "totalPages": 1,
+  "last": true,
+  "first": true,
+  "numberOfElements": 1,
+  "empty": false
+}
+```
 
-## Concurrency Handling
+The response illustrates the pagination structure; Spring Data may include additional metadata fields.
 
-The `Preference` entity uses JPA optimistic locking through the `@Version` field.
+### Filtering Implementation
 
-Two important concurrent scenarios are handled:
+The service uses `PreferenceSpecification` to construct dynamic queries.
 
-1. **Concurrent updates:** If multiple requests attempt to update the same existing preference record, optimistic locking prevents a stale update from silently overwriting a newer update.
-2. **Concurrent creation:** If multiple requests attempt to create the same tenant-user preference simultaneously, the database unique constraint ensures that only one record is created.
+The following conditions are applied:
 
-Conflicting operations are translated into appropriate conflict responses (`409 Conflict`).
+1. A mandatory tenant condition is added using `belongsToTenant(tenantId)`.
+2. If `userId` is supplied, an additional exact-match condition is added using `hasUserId(userId)`.
+3. The resulting specification is passed to the repository along with the `Pageable` object.
 
-## Validation and Error Handling
+This ensures that filtering never removes the tenant-scoping condition.
 
-The module validates:
+### 4.4 Delete Preference
 
-- `userId` must not be blank.
-- `userId` must not exceed 100 characters.
-- All three channel preference fields are required.
-- Channel preference values must be boolean.
+**Endpoint:** `DELETE /preferences/{userId}`
 
-Relevant HTTP status codes:
+**Description:**
 
-| Status | Scenario |
-|---|---|
-| `200 OK` | Successful retrieval or upsert |
-| `204 No Content` | Successful preference deletion |
-| `400 Bad Request` | Invalid request or validation failure |
-| `404 Not Found` | Requested preference does not exist |
-| `409 Conflict` | Duplicate creation or optimistic locking conflict |
-| `500 Internal Server Error` | Unexpected server-side error |
+Deletes the preference record associated with the specified user within the authenticated tenant.
 
-## Testing
+The repository operation uses both tenant ID and user ID:
 
-The module includes unit and controller tests using:
+`deleteByTenant_IdAndUserId(tenantId, userId)`
+
+This prevents a tenant from deleting another tenant's preference record.
+
+**Path Parameter:**
+
+| Parameter | Type   | Validation                                 |
+| --------- | ------ | ------------------------------------------ |
+| `userId`  | String | Must not be blank; maximum 100 characters. |
+
+**Response:** `204 No Content`
+
+The endpoint does not return a response body.
+
+The service does not explicitly check whether a preference exists before issuing the delete operation. Therefore, a deletion request for a user without a matching preference does not produce `PreferenceDoesNotExistException` in this implementation.
+
+Deleting a preference does not delete the user's notification history.
+
+## 5. Tenant Isolation
+
+Tenant isolation is a fundamental part of the Preferences module.
+
+The authenticated tenant is obtained from:
+
+`@RequestAttribute("authenticatedTenant")`
+
+The tenant ID is used in preference retrieval, listing, and deletion.
+
+| Operation         | Tenant isolation mechanism                               |
+| ----------------- | -------------------------------------------------------- |
+| Create preference | Associates the new entity with the authenticated tenant. |
+| Update preference | Finds the existing record using tenant ID and user ID.   |
+| Get preference    | Searches using tenant ID and user ID.                    |
+| List preferences  | Applies a mandatory tenant specification.                |
+| Delete preference | Deletes using tenant ID and user ID.                     |
+
+A tenant cannot retrieve, update, or delete another tenant's preference record by supplying that tenant's user ID.
+
+## 6. Database Constraints and Concurrent Creation
+
+The preference design allows only one preference record for a particular combination of tenant and user ID.
+
+The database uses the following unique constraint:
+
+`uk_preference_tenant_user`
+
+This protects the uniqueness of the `(tenant_id, user_id)` combination.
+
+### Concurrent Creation Scenario
+
+Consider two requests attempting to create preferences for the same user under the same tenant at approximately the same time.
+
+Both requests may initially find that no preference exists.
+
+However, only one request can successfully insert the record because of the database uniqueness constraint.
+
+The service handles this scenario in `savePreference()`:
+
+1. Attempts to persist the preference using `saveAndFlush()`.
+2. Catches `DataIntegrityViolationException`.
+3. Inspects the underlying cause for a Hibernate `ConstraintViolationException`.
+4. Checks whether the violated constraint is `uk_preference_tenant_user`.
+5. Throws `PreferenceAlreadyExistsException` if that constraint was violated.
+6. Rethrows the original exception for other integrity violations.
+
+This provides database-level protection against duplicate preference records even when concurrent requests pass the initial existence check.
+
+## 7. Transaction Management
+
+`PreferenceServiceImpl` is annotated with `@Transactional`.
+
+This provides transaction boundaries for service operations.
+
+The read operations use:
+
+`@Transactional(readOnly = true)`
+
+These include:
+
+- `getPreference()`
+- `getAllPreferences()`
+
+The upsert operation and delete operation execute within the service's transactional context.
+
+The use of `saveAndFlush()` in the upsert operation also ensures that database constraint violations can be detected within the `savePreference()` method, allowing the service to translate the known uniqueness violation into a domain-specific exception.
+
+## 8. Exception Handling
+
+The Preferences module defines two custom exceptions:
+
+| Exception                          | Purpose                                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `PreferenceAlreadyExistsException` | Represents a duplicate preference creation conflict, particularly when the tenant-user uniqueness constraint is violated. |
+| `PreferenceDoesNotExistException`  | Thrown when an individual preference lookup does not find a matching record.                                              |
+
+These exceptions are handled by the application's global exception-handling layer.
+
+The exact HTTP status codes and error response structure depend on the global exception handler.
+
+## 9. Preference Behavior During Notification Delivery
+
+The Preferences module is designed to work with the Notifications module.
+
+The notification system uses the tenant-provided `userId` to determine whether the corresponding notification channel is enabled.
+
+The implemented system-level behavior is:
+
+- If a preference record exists, its channel settings determine which channels are enabled for that user.
+- If no preference record exists, all notification channels are enabled by default.
+- If a channel is explicitly disabled, a notification requested for that channel is saved with status `SUPPRESSED` and is not sent.
+- If `userId` is absent from a notification request, preference checking is skipped.
+- All three channels may be disabled simultaneously.
+
+`NotificationServiceImpl` enforces these settings during notification creation. When `userId` is supplied, it calls `PreferenceService.isChannelEnabled()` with the authenticated tenant ID, the external user ID, and the requested `NotificationChannel`. This keeps the lookup tenant-scoped.
+
+If the requested channel is enabled, or no preference record exists, the existing synchronous delivery flow continues. If the channel is disabled, the notification is persisted as `SUPPRESSED` and the `NotificationSender` is not invoked.
+
+The preference service remains responsible for managing preference records; the Notifications module owns enforcement in the notification workflow.
+
+### Independent Notification History
+
+Preference records and notification history are intentionally independent.
+
+A notification stores its own tenant ID and optional external user ID.
+
+There is no foreign-key dependency from notification history to the preference record.
+
+Consequently:
+
+- Deleting a preference does not delete past notifications.
+- Notification history remains available after preference deletion.
+- Removing a preference does not erase the user's notification records.
+
+This separation preserves notification history independently of a user's current communication preferences.
+
+## 10. Optimistic Locking
+The Preference entity uses JPA optimistic locking through the @Version annotation. This prevents concurrent updates from silently overwriting each other.
+
+When multiple requests attempt to update the same preference record, Hibernate checks the version during persistence. If a request tries to update a stale version, an optimistic locking exception is raised.
+
+This ensures data consistency without requiring pessimistic database locks.
+
+
+## 11. Design Decisions
+
+The following decisions define the Preferences module's intended behavior.
+
+| Design area                                     | Decision                                       |
+| ----------------------------------------------- | ---------------------------------------------- |
+| Preference ownership                            | Tenant-scoped.                                 |
+| User identity                                   | External `userId` supplied by the tenant.      |
+| User profiles                                   | No central user profile management.            |
+| Uniqueness                                      | One preference per `(tenant_id, user_id)`.     |
+| Update operation                                | PUT with full-replacement/upsert semantics.    |
+| Missing preference lookup                       | Returns a domain exception for individual GET. |
+| Missing preference during notification delivery | All channels enabled by default.               |
+| Channel preferences                             | Email, SMS, and Push.                          |
+| All channels disabled                           | Allowed.                                       |
+| Preference deletion                             | Deletes only the preference record.            |
+| Notification history                            | Independent of preference records.             |
+| Pagination                                      | Default page 0, size 20.                       |
+| Filtering                                       | Exact user ID filtering.                       |
+
+## 12. Testing
+
+The Preferences module should be tested at both controller and service levels.
+
+The project's testing stack includes:
 
 - JUnit 5
 - Mockito
 - MockMvc
-- AssertJ
 
-### Service Tests
+Important test scenarios include:
 
-- Create a new preference.
+### Upsert Tests
+
+- Create a preference when none exists.
 - Update an existing preference.
-- Create preferences with all channels disabled.
+- Verify all three channel values are replaced.
+- Verify all three Boolean fields are required.
+- Verify tenant association.
+- Verify duplicate creation conflicts are handled.
+
+### Retrieval Tests
+
 - Retrieve an existing preference.
-- Handle missing preferences.
-- Retrieve all preferences.
-- Handle an empty preference list.
-- Verify tenant-scoped, idempotent deletion.
+- Return the appropriate exception when no preference exists.
+- Verify tenant isolation.
 
-### Controller Tests
+### Listing Tests
 
-- Successful preference creation and update.
-- Validation of missing channel preference fields.
-- User ID length validation.
-- Successful preference retrieval.
-- Handling nonexistent preferences.
-- Retrieving all preferences.
-- Successful deletion.
-- Idempotent deletion.
-- Invalid user ID handling.
+- Return preferences with default pagination.
+- Apply custom pagination.
+- Filter by exact user ID.
+- Return only records belonging to the authenticated tenant.
+- Return an empty page when no records match.
 
-## Design Decisions
+### Delete Tests
 
-- No central User entity is maintained.
-- Tenants manage their own users and provide external user IDs.
-- Preferences are tenant-scoped.
-- A preference record is optional for a user.
-- PUT provides full replacement/upsert semantics.
-- Deleting preferences does not affect notification history.
-- Notification history maintains its own user ID snapshot and has no foreign-key dependency on the preference record.
-- Optimistic locking protects concurrent updates.
-- Database uniqueness protects against duplicate preference records.
+- Delete an existing preference.
+- Verify that deletion is tenant-scoped.
+- Verify that notification history is not deleted.
+- Verify behavior when no matching preference exists.
 
-## Future Enhancements
+### Notification Preference Enforcement Tests
 
-- Pagination and filtering for preference retrieval.
-- Database indexes based on actual query patterns.
-- Integration testing with PostgreSQL.
+The Notifications service tests verify the integration with the Preferences service:
+
+- Suppress a notification when its requested channel is disabled.
+- Continue delivery when the requested channel is enabled.
+- Continue delivery when no preference record exists (default allow).
+- Skip preference checking when `userId` is absent.
+- Verify that `NotificationSender` is not invoked for a suppressed notification.
+
+## 13. Future Improvements
+
+Potential production-oriented improvements include:
+
+- Auditing preference changes.
+- Adding more flexible filtering where required.
+- Adding integration tests for concurrent preference creation.
+- Improving observability for preference-related failures.
+- Reviewing optimistic locking behavior under concurrent updates.
+- Adding preference-change events if future delivery workflows require them.
+
+---
+
+## 14. Summary
+
+The Preferences module provides tenant-isolated management of end-user notification preferences.
+
+It supports full-replacement upserts, individual retrieval, paginated listing, exact user ID filtering, and deletion.
+
+Its database uniqueness constraint protects against duplicate tenant-user preference records, while its separation from notification history ensures that preference changes do not affect previously created notifications.
+
+The module provides the preference data and service operations used by the Notifications module to enforce channel choices during notification creation. Disabled channels result in `SUPPRESSED` notifications, while missing preference records default to allowing delivery. The current enforcement occurs in the synchronous notification workflow; the planned asynchronous delivery phase will need to preserve this preference behavior.
