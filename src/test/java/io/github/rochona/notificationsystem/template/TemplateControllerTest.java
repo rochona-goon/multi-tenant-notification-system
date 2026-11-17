@@ -1,5 +1,9 @@
 package io.github.rochona.notificationsystem.template;
 
+import io.github.rochona.notificationsystem.notification.dto.NotificationResponseDTO;
+import io.github.rochona.notificationsystem.notification.enums.NotificationChannel;
+import io.github.rochona.notificationsystem.notification.enums.NotificationStatus;
+import io.github.rochona.notificationsystem.ratelimit.RateLimiterService;
 import io.github.rochona.notificationsystem.template.controller.TemplateController;
 import io.github.rochona.notificationsystem.template.dto.TemplateRequestDto;
 import io.github.rochona.notificationsystem.template.dto.TemplateResponseDto;
@@ -18,12 +22,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.data.domain.*;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,6 +56,9 @@ public class TemplateControllerTest {
     @MockitoBean
     private TenantAuthenticationService tenantAuthenticationService;
 
+    @MockitoBean
+    private RateLimiterService rateLimiterService;
+
     private Tenant tenant;
 
     @BeforeEach
@@ -60,6 +69,8 @@ public class TemplateControllerTest {
 
         when(tenantAuthenticationService.authenticate(anyString()))
                 .thenReturn(tenant);
+
+        when(rateLimiterService.isAllowed(anyLong())).thenReturn(true);
     }
 
     // ------ create template ----->
@@ -174,15 +185,14 @@ public class TemplateControllerTest {
     // ----------- getAllTemplates -------->
 
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void shouldReturn200WhenActiveOrInactiveTemplatesAreRequested(boolean active) throws Exception{
+    @Test
+    void shouldReturnAllTemplatesWhenNoFiltersAreProvided() throws Exception{
 
         // Arrange
 
         TemplateResponseDto response = new TemplateResponseDto();
         response.setId(1L);
-        response.setActive(active);
+        response.setActive(true);
         response.setSubject("Test Subject");
         response.setName("Test Name");
         response.setBodyText("Test Text Body");
@@ -191,14 +201,22 @@ public class TemplateControllerTest {
 
         TemplateResponseDto response2 = new TemplateResponseDto();
         response2.setId(2L);
-        response2.setActive(active);
+        response2.setActive(false);
         response2.setSubject("Test Subject2");
         response2.setName("Test Name2");
         response2.setBodyText("Test Text Body2");
         response2.setBodyHtml("<h1> Test HTML Body2 </h1>");
 
-        when(templateService.getTemplates(eq(tenant), eq(active)))
-                .thenReturn(List.of(response, response2));
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Page<TemplateResponseDto> responsePage = new PageImpl<>(List.of(response, response2), pageable, 2);
+
+
+        when(templateService.getTemplates(eq(tenant),
+                nullable(String.class),
+                nullable(Boolean.class),
+                any(Pageable.class)))
+                .thenReturn(responsePage);
 
 
         // Act & Assert
@@ -206,34 +224,49 @@ public class TemplateControllerTest {
         MockHttpServletRequestBuilder request = get("/templates")
                 .header("X-API-KEY", "tenant-api-key");
 
-        if(!active){
-            request.param("active", "false");
-        }
 
         mockMvc.perform(request)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].active").value(active))
-                .andExpect(jsonPath("$[1].active").value(active));
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].active").value(true))
+                .andExpect(jsonPath("$.content[1].active").value(false));
 
 
-        verify(templateService).getTemplates(tenant, active);
+        verify(templateService).getTemplates(
+                eq(tenant),
+                nullable(String.class),
+                nullable(Boolean.class),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending())));
 
     }
 
     @Test
     void shouldReturn200WithEmptyListWhenNoTemplatesExist() throws Exception{
 
-        when(templateService.getTemplates(any(Tenant.class), anyBoolean()))
-                .thenReturn(List.of());
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Page<TemplateResponseDto> responsePage = new PageImpl<>(List.of(), pageable, 2);
+
+
+        when(templateService.getTemplates(eq(tenant),
+                nullable(String.class),
+                nullable(Boolean.class),
+                any(Pageable.class)))
+                .thenReturn(responsePage);
 
 
         mockMvc.perform(get("/templates")
                 .header("X-API-KEY", "tenant-api-key"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isEmpty());
+                .andExpect(jsonPath("$.content").isEmpty());
 
 
-        verify(templateService).getTemplates(tenant, true);
+        verify(templateService).getTemplates(
+                eq(tenant),
+                nullable(String.class),
+                nullable(Boolean.class),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending())));
 
     }
 
@@ -524,6 +557,64 @@ public class TemplateControllerTest {
         // Verify the call
         verify(templateService).updateTemplateStatus(eq(1L), anyBoolean(), same(tenant));
 
+    }
+
+
+
+    // ------------------ Pagination & Filtering --------------->
+
+    @Test
+    void shouldReturnTemplatesFilteredByName() throws Exception{
+
+        mockMvc.perform(get("/templates")
+                        .param("name", "welcome")
+                        .header("X-API-KEY", "tenant-api-key"))
+                .andExpect(status().isOk());
+
+        verify(templateService).getTemplates(
+                eq(tenant),
+                eq("welcome"),
+                nullable(Boolean.class),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending()))
+        );
+    }
+
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldReturnTemplatesFilteredByStatus(boolean active) throws Exception {
+
+
+        mockMvc.perform(get("/templates")
+                        .header("X-API-KEY", "test-api-key")
+                        .param("active", String.valueOf(active)))
+                .andExpect(status().isOk());
+
+        verify(templateService).getTemplates(
+                eq(tenant),
+                nullable(String.class),
+                eq(active),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending()))
+        );
+    }
+
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldReturnTemplatesFilteredByMultipleCriteria(boolean active) throws Exception {
+
+        mockMvc.perform(get("/templates")
+                        .header("X-API-KEY", "test-api-key")
+                        .param("name", "welcome")
+                        .param("active", String.valueOf(active)))
+                .andExpect(status().isOk());
+
+        verify(templateService).getTemplates(
+                eq(tenant),
+                eq("welcome"),
+                eq(active),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending()))
+        );
     }
 
 }

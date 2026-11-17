@@ -4,7 +4,9 @@ import io.github.rochona.notificationsystem.preference.controller.PreferenceCont
 import io.github.rochona.notificationsystem.preference.dto.PreferenceRequestDto;
 import io.github.rochona.notificationsystem.preference.dto.PreferenceResponseDto;
 import io.github.rochona.notificationsystem.preference.exception.PreferenceDoesNotExistException;
+import io.github.rochona.notificationsystem.preference.model.Preference;
 import io.github.rochona.notificationsystem.preference.service.PreferenceService;
+import io.github.rochona.notificationsystem.ratelimit.RateLimiterService;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import io.github.rochona.notificationsystem.tenant.service.TenantAuthenticationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.data.domain.*;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,6 +46,9 @@ public class PreferenceControllerTest {
 
     @MockitoBean
     private TenantAuthenticationService tenantAuthenticationService;
+
+    @MockitoBean
+    private RateLimiterService rateLimiterService;
 
     private Tenant tenant;
 
@@ -77,6 +83,9 @@ public class PreferenceControllerTest {
 
         when(tenantAuthenticationService.authenticate(anyString()))
                 .thenReturn(tenant);
+
+        when(rateLimiterService.isAllowed(anyLong())).thenReturn(true);
+
     }
 
 
@@ -304,28 +313,39 @@ public class PreferenceControllerTest {
         response1.setCreatedAt(Instant.now());
         response1.setUpdatedAt(Instant.now());
 
-        when(preferenceService.getAllPreferences(eq(tenant.getId())))
-                .thenReturn(List.of(response,response1));
+        Pageable pageable = PageRequest.of(0, 20, Sort.by("createdAt").descending());
+
+        Page<PreferenceResponseDto> responsePage = new PageImpl<>(List.of(response, response1), pageable, 2);
+
+        when(preferenceService.getAllPreferences(
+                eq(tenant.getId()),
+                nullable(String.class),
+                eq(pageable)))
+                .thenReturn(responsePage);
 
 
         // Act & Assert
 
         mockMvc.perform(get("/preferences")
                         .header("X-API-KEY", "tenant-api-key"))
-                .andDo(print())
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].userId").value("testuser101"))
-                .andExpect(jsonPath("$[0].emailEnabled").value(true))
-                .andExpect(jsonPath("$[0].smsEnabled").value(false))
-                .andExpect(jsonPath("$[0].pushEnabled").value(true))
-                .andExpect(jsonPath("$[1].userId").value("testuser102"))
-                .andExpect(jsonPath("$[1].emailEnabled").value(true))
-                .andExpect(jsonPath("$[1].smsEnabled").value(true))
-                .andExpect(jsonPath("$[1].pushEnabled").value(true));
+                .andDo(print())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].userId").value("testuser101"))
+                .andExpect(jsonPath("$.content[0].emailEnabled").value(true))
+                .andExpect(jsonPath("$.content[0].smsEnabled").value(false))
+                .andExpect(jsonPath("$.content[0].pushEnabled").value(true))
+                .andExpect(jsonPath("$.content[1].userId").value("testuser102"))
+                .andExpect(jsonPath("$.content[1].emailEnabled").value(true))
+                .andExpect(jsonPath("$.content[1].smsEnabled").value(true))
+                .andExpect(jsonPath("$.content[1].pushEnabled").value(true));
 
 
         // Verify
-        verify(preferenceService).getAllPreferences(eq(tenant.getId()));
+        verify(preferenceService).getAllPreferences(
+                eq(tenant.getId()),
+                nullable(String.class),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending())));
 
     }
 
@@ -333,18 +353,31 @@ public class PreferenceControllerTest {
     @Test
     void shouldReturnEmptyListWhenNoPreferencesExist() throws Exception{
 
-        when(preferenceService.getAllPreferences(eq(tenant.getId())))
-                .thenReturn(List.of());
+        Pageable pageable = PageRequest.of(0, 20, Sort.by("createdAt").descending());
+
+        Page<PreferenceResponseDto> responsePage = new PageImpl<>(List.of(), pageable, 2);
+
+        when(preferenceService.getAllPreferences(
+                eq(tenant.getId()),
+                nullable(String.class),
+                eq(pageable)))
+                .thenReturn(responsePage);
 
 
         // Act & Assert
 
         mockMvc.perform(get("/preferences")
                         .header("X-API-KEY", "tenant-api-key"))
-                .andDo(print())
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(0));
+
+
+        // Verify
+        verify(preferenceService).getAllPreferences(
+                eq(tenant.getId()),
+                nullable(String.class),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending())));
 
     }
 
@@ -399,6 +432,29 @@ public class PreferenceControllerTest {
         // Verify
 
         verify(preferenceService, never()).deletePreference(eq(tenant.getId()), eq("testuser101"));
+    }
+
+
+
+    // ------------------------ Pagination & Filtering ----------------------->
+
+
+    @Test
+    void shouldReturnPreferencesFilteredByUserId() throws Exception{
+
+        // Act & Assert
+
+        mockMvc.perform(get("/preferences")
+                        .param("userId", "testuser101")
+                        .header("X-API-KEY", "tenant-api-key"))
+                .andExpect(status().isOk());
+
+
+        // Verify
+        verify(preferenceService).getAllPreferences(
+                eq(tenant.getId()),
+                nullable(String.class),
+                eq(PageRequest.of(0, 20, Sort.by("createdAt").descending())));
     }
 
 }

@@ -1,10 +1,13 @@
 package io.github.rochona.notificationsystem.tenant;
 
+import io.github.rochona.notificationsystem.ratelimit.RateLimiterService;
 import io.github.rochona.notificationsystem.tenant.controller.TenantController;
 import io.github.rochona.notificationsystem.tenant.dto.TenantRegistrationRequest;
 import io.github.rochona.notificationsystem.tenant.dto.TenantRegistrationResponse;
+import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import io.github.rochona.notificationsystem.tenant.service.TenantAuthenticationService;
 import io.github.rochona.notificationsystem.tenant.service.TenantService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -34,6 +37,15 @@ public class TenantControllerTest {
 
     @MockitoBean
     private TenantAuthenticationService tenantAuthenticationService;
+
+    @MockitoBean
+    private RateLimiterService rateLimiterService;
+
+
+    @BeforeEach
+    void setUp(){
+        when(rateLimiterService.isAllowed(anyLong())).thenReturn(true);
+    }
 
 
     @Test

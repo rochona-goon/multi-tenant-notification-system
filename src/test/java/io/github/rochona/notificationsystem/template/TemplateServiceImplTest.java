@@ -1,5 +1,10 @@
 package io.github.rochona.notificationsystem.template;
 
+import io.github.rochona.notificationsystem.notification.dto.NotificationResponseDTO;
+import io.github.rochona.notificationsystem.notification.enums.NotificationChannel;
+import io.github.rochona.notificationsystem.notification.enums.NotificationStatus;
+import io.github.rochona.notificationsystem.notification.model.Notification;
+import io.github.rochona.notificationsystem.ratelimit.RateLimiterService;
 import io.github.rochona.notificationsystem.template.dto.TemplateRequestDto;
 import io.github.rochona.notificationsystem.template.dto.TemplateResponseDto;
 import io.github.rochona.notificationsystem.template.exception.TemplateAlreadyActiveException;
@@ -21,6 +26,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.*;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.List;
 import java.util.Optional;
@@ -45,6 +53,7 @@ public class TemplateServiceImplTest {
         tenant = new Tenant();
         tenant.setId(1L);
         tenant.setName("Test Tenant");
+
     }
 
     // ---------- createTemplate ---------->
@@ -233,31 +242,36 @@ public class TemplateServiceImplTest {
         response2.setBodyText("Test Text Body2");
         response2.setBodyHtml("<h1> Test HTML Body2 </h1>");
 
+        Pageable pageable = PageRequest.of(0, 20);
 
-        when(templateRepository.findAllByTenantIdAndIsActive(eq(tenant.getId()), eq(active)))
-                .thenReturn(List.of(response, response2));
+        Page<Template> responsePage = new PageImpl<>(List.of(response, response2), pageable, 2);
+
+
+        when(templateRepository.findAll(any(Specification.class), eq(pageable)))
+                .thenReturn(responsePage);
+
 
         // Act
 
-        List<TemplateResponseDto> result = templateService.getTemplates(tenant, active);
+        Page<TemplateResponseDto> result = templateService.getTemplates(tenant, null, null, pageable);
 
 
         // Assert
 
         assertNotNull(result);
-        assertEquals(2, result.size());
+        assertEquals(2, result.getContent().size());
 
-        assertEquals(1L, result.get(0).getId());
-        assertEquals("Test Name", result.get(0).getName());
-        assertEquals(active, result.get(0).isActive());
+        assertEquals(1L, result.getContent().get(0).getId());
+        assertEquals("Test Name", result.getContent().get(0).getName());
+        assertEquals(active, result.getContent().get(0).isActive());
 
-        assertEquals(2L, result.get(1).getId());
-        assertEquals("Test Name2", result.get(1).getName());
-        assertEquals(active, result.get(1).isActive());
+        assertEquals(2L, result.getContent().get(1).getId());
+        assertEquals("Test Name2", result.getContent().get(1).getName());
+        assertEquals(active, result.getContent().get(1).isActive());
 
 
         // Verify repository invocation
-        verify(templateRepository).findAllByTenantIdAndIsActive(eq(tenant.getId()), eq(active));
+        verify(templateRepository).findAll(any(Specification.class), eq(pageable));
     }
 
 
@@ -265,20 +279,24 @@ public class TemplateServiceImplTest {
     void shouldReturnEmptyListWhenNoTemplatesExist(){
 
         // Arrange
+        Pageable pageable = PageRequest.of(0, 20);
 
-        when(templateRepository.findAllByTenantIdAndIsActive(eq(tenant.getId()), anyBoolean()))
-                .thenReturn(List.of());
+        Page<Template> responsePage = new PageImpl<>(List.of(), pageable, 2);
+
+
+        when(templateRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(responsePage);
 
         // Act
 
-        List<TemplateResponseDto> result = templateService.getTemplates(tenant, true);
+        Page<TemplateResponseDto> result = templateService.getTemplates(tenant, null, null, pageable);
 
         // Assert
 
         assertTrue(result.isEmpty());
 
         // Verify the call
-        verify(templateRepository).findAllByTenantIdAndIsActive(eq(tenant.getId()), eq(true));
+        verify(templateRepository).findAll(any(Specification.class), eq(pageable));
 
     }
 
@@ -339,28 +357,64 @@ public class TemplateServiceImplTest {
         verify(templateRepository).findByIdAndTenantId(eq(1L), eq(tenant.getId()));
     }
 
+
     @Test
-    void shouldThrowExceptionWhenTemplateBelongsToAnotherTenant(){
-
+    void shouldReturnActiveTemplateWhenIdAndTenantMatch() {
         // Arrange
+        Template template = new Template();
+        template.setId(1L);
+        template.setName("Welcome");
+        template.setActive(true);
 
-        when(templateRepository.findByIdAndTenantId(eq(1L), anyLong()))
-                .thenReturn(Optional.empty());
+        when(templateRepository.findByIdAndTenantId(1L, tenant.getId()))
+                .thenReturn(Optional.of(template));
 
+        // Act
+        Template result = templateService.getTemplateEntityById(1L, tenant);
 
-        // Act & Assert
+        // Assert
+        assertNotNull(result);
+        assertEquals(1L, result.getId());
+        assertTrue(result.isActive());
 
-        assertThrows(
-                TemplateNotFoundException.class,
-                () -> templateService.getTemplatesById(1L, tenant)
-        );
-
-
-        // Verify the call
-        verify(templateRepository).findByIdAndTenantId(eq(1L), eq(tenant.getId()));
-
+        verify(templateRepository).findByIdAndTenantId(1L, tenant.getId());
     }
 
+
+    @Test
+    void shouldThrowExceptionWhenTemplateDoesNotBelongToTenant() {
+        // Arrange
+        when(templateRepository.findByIdAndTenantId(1L, tenant.getId()))
+                .thenReturn(Optional.empty());
+
+        // Act & Assert
+        assertThrows(
+                TemplateNotFoundException.class,
+                () -> templateService.getTemplateEntityById(1L, tenant)
+        );
+
+        verify(templateRepository).findByIdAndTenantId(1L, tenant.getId());
+    }
+
+
+    @Test
+    void shouldThrowExceptionWhenTemplateIsInactive() {
+        // Arrange
+        Template template = new Template();
+        template.setId(1L);
+        template.setActive(false);
+
+        when(templateRepository.findByIdAndTenantId(1L, tenant.getId()))
+                .thenReturn(Optional.of(template));
+
+        // Act & Assert
+        assertThrows(
+                TemplateNotFoundException.class,
+                () -> templateService.getTemplateEntityById(1L, tenant)
+        );
+
+        verify(templateRepository).findByIdAndTenantId(1L, tenant.getId());
+    }
 
 
     // ------------ updateTemplateById ----------->
@@ -650,5 +704,72 @@ public class TemplateServiceImplTest {
         verify(templateRepository, never()).save(any(Template.class));
 
 
+    }
+
+
+    // -------------- Pagination & Filtering ---------------->
+
+    @Test
+    void shouldFilterTemplateByName() {
+
+        // Arrange
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Template response = new Template();
+        response.setId(1L);
+        response.setActive(true);
+        response.setSubject("Test Subject");
+        response.setName("Welcome");
+        response.setBodyText("Test Text Body");
+        response.setBodyHtml("<h1> Test HTML Body </h1>");
+
+        Page<Template> responsePage =
+                new PageImpl<>(List.of(response), pageable, 1);
+
+        when(templateRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(responsePage);
+
+        // Act
+        Page<TemplateResponseDto> result =
+                templateService.getTemplates(
+                        tenant, "welcome", null, pageable);
+
+        // Assert
+        assertEquals(1, result.getContent().size());
+        assertEquals("Welcome", result.getContent().get(0).getName());
+
+        verify(templateRepository).findAll(any(Specification.class), eq(pageable));
+    }
+
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldFilterTemplateByStatus(boolean active) {
+
+        // Arrange
+        Pageable pageable = PageRequest.of(0, 20);
+
+        Template response = new Template();
+        response.setId(1L);
+        response.setActive(active);
+        response.setSubject("Test Subject");
+        response.setName("Welcome");
+        response.setBodyText("Test Text Body");
+        response.setBodyHtml("<h1> Test HTML Body </h1>");
+
+        Page<Template> responsePage =
+                new PageImpl<>(List.of(response), pageable, 1);
+
+        when(templateRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(responsePage);
+
+        // Act
+        Page<TemplateResponseDto> result =
+                templateService.getTemplates(
+                        tenant, null , active, pageable);
+
+        // Assert
+        assertEquals(1, result.getContent().size());
+        assertEquals(active, result.getContent().get(0).isActive());
+
+        verify(templateRepository).findAll(any(Specification.class), eq(pageable));
     }
 }
