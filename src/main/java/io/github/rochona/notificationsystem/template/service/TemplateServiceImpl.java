@@ -1,5 +1,7 @@
 package io.github.rochona.notificationsystem.template.service;
 
+import io.github.rochona.notificationsystem.notification.model.Notification;
+import io.github.rochona.notificationsystem.notification.specification.NotificationSpecification;
 import io.github.rochona.notificationsystem.template.dto.TemplateRequestDto;
 import io.github.rochona.notificationsystem.template.dto.TemplateResponseDto;
 import io.github.rochona.notificationsystem.template.exception.TemplateAlreadyActiveException;
@@ -8,10 +10,14 @@ import io.github.rochona.notificationsystem.template.exception.TemplateNameAlrea
 import io.github.rochona.notificationsystem.template.exception.TemplateNotFoundException;
 import io.github.rochona.notificationsystem.template.model.Template;
 import io.github.rochona.notificationsystem.template.repository.TemplateRepository;
+import io.github.rochona.notificationsystem.template.specification.TemplateSpecification;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,8 +53,19 @@ public class TemplateServiceImpl implements TemplateService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TemplateResponseDto> getTemplates(Tenant tenant, boolean isActive) {
-        return toResponseDto(templateRepository.findAllByTenantIdAndIsActive(tenant.getId(), isActive));
+    public Page<TemplateResponseDto> getTemplates(Tenant tenant, String name, Boolean active, Pageable pageable) {
+
+        Specification<Template> specification = TemplateSpecification.belongsToTenant(tenant.getId());
+
+        if(name != null){
+            specification = specification.and(TemplateSpecification.hasName(name));
+        }
+
+        if(active != null){
+            specification = specification.and(TemplateSpecification.hasActiveStatus(active));
+        }
+
+        return templateRepository.findAll(specification, pageable).map(this::toResponseDto);
     }
 
     @Override
@@ -61,6 +78,25 @@ public class TemplateServiceImpl implements TemplateService {
 
         return toResponseDto(template);
     }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public Template getTemplateEntityById(Long id, Tenant tenant) {
+
+        Template template = templateRepository
+                .findByIdAndTenantId(id, tenant.getId())
+                .orElseThrow(() ->
+                        new TemplateNotFoundException("Template not found"));
+
+        if (!template.isActive()) {
+            throw new TemplateNotFoundException("Template is inactive");
+        }
+
+        return template;
+    }
+
+
 
     @Override
     public TemplateResponseDto updateTemplateById(Long id, TemplateRequestDto requestDto, Tenant tenant) {
@@ -108,6 +144,7 @@ public class TemplateServiceImpl implements TemplateService {
 
         return toResponseDto(templateRepository.save(template));
     }
+
 
 
     private TemplateResponseDto toResponseDto(Template template){

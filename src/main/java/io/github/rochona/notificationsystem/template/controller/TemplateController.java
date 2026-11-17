@@ -1,5 +1,7 @@
 package io.github.rochona.notificationsystem.template.controller;
 
+import io.github.rochona.notificationsystem.notification.enums.NotificationChannel;
+import io.github.rochona.notificationsystem.notification.enums.NotificationStatus;
 import io.github.rochona.notificationsystem.template.dto.TemplateRequestDto;
 import io.github.rochona.notificationsystem.template.dto.TemplateResponseDto;
 import io.github.rochona.notificationsystem.template.service.TemplateService;
@@ -7,11 +9,14 @@ import io.github.rochona.notificationsystem.template.dto.TemplateStatusRequestDt
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @RestController
 @RequestMapping("/templates")
@@ -29,9 +34,27 @@ public class TemplateController {
 
     //  get templates
     @GetMapping
-    public ResponseEntity<List<TemplateResponseDto>> getAllTemplates(@RequestAttribute("authenticatedTenant") Tenant tenant, @RequestParam(defaultValue = "true") boolean active){
-        List<TemplateResponseDto> response = templateService.getTemplates(tenant, active);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<Page<TemplateResponseDto>> getAllTemplates(
+                     @RequestAttribute("authenticatedTenant") Tenant tenant,
+                     @RequestParam(defaultValue = "0") int page,
+                     @RequestParam(defaultValue = "20") int size,
+                     @RequestParam(required = false) String name,
+                     @RequestParam(required = false) Boolean active
+     ){
+
+        if(page < 0){
+            throw new IllegalArgumentException("Page number cannot be negative");
+        }
+
+        if(size < 1 || size > 100){
+            throw new IllegalArgumentException("Page size must be between 1 to 100");
+        }
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+
+
+        return ResponseEntity.ok(templateService.getTemplates(tenant, name, active, pageable));
     }
 
     // get template by id and tenant
