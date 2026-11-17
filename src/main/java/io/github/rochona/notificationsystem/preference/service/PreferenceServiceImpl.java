@@ -1,15 +1,20 @@
 package io.github.rochona.notificationsystem.preference.service;
 
+import io.github.rochona.notificationsystem.notification.enums.NotificationChannel;
 import io.github.rochona.notificationsystem.preference.exception.PreferenceAlreadyExistsException;
 import io.github.rochona.notificationsystem.preference.exception.PreferenceDoesNotExistException;
 import io.github.rochona.notificationsystem.preference.dto.PreferenceRequestDto;
 import io.github.rochona.notificationsystem.preference.dto.PreferenceResponseDto;
 import io.github.rochona.notificationsystem.preference.model.Preference;
 import io.github.rochona.notificationsystem.preference.repository.PreferenceRepository;
+import io.github.rochona.notificationsystem.preference.specification.PreferenceSpecification;
 import io.github.rochona.notificationsystem.tenant.model.Tenant;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,13 +67,39 @@ public class PreferenceServiceImpl implements PreferenceService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<PreferenceResponseDto> getAllPreferences(Long tenantId) {
-        return toResponseDto(preferenceRepository.findAllByTenant_Id(tenantId));
+    public Page<PreferenceResponseDto> getAllPreferences(Long tenantId, String userId, Pageable pageable) {
+
+        Specification<Preference> specification = PreferenceSpecification.belongsToTenant(tenantId);
+
+        if(userId != null){
+            specification = specification.and(PreferenceSpecification.hasUserId(userId));
+        }
+
+        return preferenceRepository.findAll(specification, pageable).map(this::toResponseDto);
     }
 
     @Override
     public void deletePreference(Long tenantId, String userId) {
         preferenceRepository.deleteByTenant_IdAndUserId(tenantId, userId);
+    }
+
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isChannelEnabled(
+            Long tenantId,
+            String userId,
+            NotificationChannel channel
+    ) {
+        return preferenceRepository
+                .findByTenant_IdAndUserId(tenantId, userId)
+                .map(preference -> switch (channel) {
+                    case EMAIL -> preference.isEmailEnabled();
+                    case SMS -> preference.isSmsEnabled();
+                    case PUSH -> preference.isPushEnabled();
+                })
+                .orElse(true);
     }
 
 
@@ -87,14 +118,10 @@ public class PreferenceServiceImpl implements PreferenceService {
 
 
     private List<PreferenceResponseDto> toResponseDto(List<Preference> preferences){
-
         return preferences.stream().map(this::toResponseDto).toList();
     }
 
 
-
-
-    // TO BE REVIEWED LATER
     private Preference savePreference(Preference preference){
 
         try {

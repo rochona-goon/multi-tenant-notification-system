@@ -8,6 +8,10 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,8 +36,13 @@ public class PreferenceController {
     }
 
     @GetMapping
-    public ResponseEntity<List<PreferenceResponseDto>> getAllPreferences(@RequestAttribute("authenticatedTenant") Tenant tenant){
-        return ResponseEntity.ok(preferenceService.getAllPreferences(tenant.getId()));
+    public ResponseEntity<Page<PreferenceResponseDto>> getAllPreferences(@RequestAttribute("authenticatedTenant") Tenant tenant,
+                                                                         @RequestParam(defaultValue = "0") int page,
+                                                                         @RequestParam(defaultValue = "20") int size,
+                                                                         @RequestParam(required = false) String userId){
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+        return ResponseEntity.ok(preferenceService.getAllPreferences(tenant.getId(), userId, pageable));
     }
 
     @DeleteMapping("/{userId}")

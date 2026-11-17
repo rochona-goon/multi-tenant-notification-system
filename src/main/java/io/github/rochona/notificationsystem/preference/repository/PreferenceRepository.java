@@ -2,16 +2,17 @@ package io.github.rochona.notificationsystem.preference.repository;
 
 import io.github.rochona.notificationsystem.preference.model.Preference;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface PreferenceRepository extends JpaRepository<Preference, Long> {
+public interface PreferenceRepository extends JpaRepository<Preference, Long>, JpaSpecificationExecutor<Preference> {
     Optional<Preference> findByTenant_IdAndUserId(Long tenantId, String userId);
 
-    List<Preference> findAllByTenant_Id(Long tenantId);
+//    List<Preference> findAllByTenant_Id(Long tenantId);
 
     boolean existsByTenant_IdAndUserId(Long tenantId, String userId);
 
