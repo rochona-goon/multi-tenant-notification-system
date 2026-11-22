@@ -18,11 +18,14 @@ class TemplateRendererTest {
             templateRenderer = new TemplateRenderer();
         }
 
+
+        // ---------------- TEXT ------------------>
+
         @Test
         void shouldReplaceSingleVariable() {
             String content = "Hello {{userName}}";
 
-            String result = templateRenderer.render(
+            String result = templateRenderer.renderText(
                     content,
                     Map.of("userName", "Rochona")
             );
@@ -34,7 +37,7 @@ class TemplateRendererTest {
         void shouldReplaceMultipleVariables() {
             String content = "Hello {{userName}}, your booking {{bookingId}} is confirmed.";
 
-            String result = templateRenderer.render(
+            String result = templateRenderer.renderText(
                     content,
                     Map.of(
                             "userName", "Rochona",
@@ -50,7 +53,7 @@ class TemplateRendererTest {
         void shouldReplaceRepeatedOccurrencesOfSameVariable() {
             String content = "Hello {{userName}}. Welcome back, {{userName}}!";
 
-            String result = templateRenderer.render(
+            String result = templateRenderer.renderText(
                     content,
                     Map.of("userName", "Rochona")
             );
@@ -64,7 +67,7 @@ class TemplateRendererTest {
             String content = "Hello {{userName}}";
 
             assertThatThrownBy(() ->
-                    templateRenderer.render(content, Map.of())
+                    templateRenderer.renderText(content, Map.of())
             )
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("Missing template variable: userName");
@@ -78,7 +81,7 @@ class TemplateRendererTest {
             variables.put("userName", null);
 
             assertThatThrownBy(() ->
-                    templateRenderer.render(content, variables)
+                    templateRenderer.renderText(content, variables)
             )
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("Missing template variable: userName");
@@ -87,7 +90,7 @@ class TemplateRendererTest {
         @Test
         void shouldThrowExceptionWhenContentIsNull() {
             assertThatThrownBy(() ->
-                    templateRenderer.render(null, Map.of())
+                    templateRenderer.renderText(null, Map.of())
             )
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("Template content cannot be null");
@@ -97,7 +100,7 @@ class TemplateRendererTest {
         void shouldInsertSpecialCharactersLiterally() {
             String content = "Your reference is {{reference}}";
 
-            String result = templateRenderer.render(
+            String result = templateRenderer.renderText(
                     content,
                     Map.of("reference", "$booking\\123")
             );
@@ -110,7 +113,7 @@ class TemplateRendererTest {
             String content = "Hello {{userName";
 
             assertThatThrownBy(() ->
-                    templateRenderer.render(content, Map.of("userName", "Rochona"))
+                    templateRenderer.renderText(content, Map.of("userName", "Rochona"))
             )
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("Template contains malformed or unresolved placeholders");
@@ -120,9 +123,57 @@ class TemplateRendererTest {
         void shouldReturnOriginalContentWhenNoPlaceholdersExist() {
             String content = "Your booking has been confirmed.";
 
-            String result = templateRenderer.render(content, Map.of());
+            String result = templateRenderer.renderText(content, Map.of());
 
             assertThat(result).isEqualTo(content);
         }
+
+
+
+        //  ------------------ HTML ------------------->
+
+
+    @Test
+    void shouldRenderHtmlAndEscapeSpecialCharacters() {
+        String content = "<p>Hello {{userName}}</p>";
+
+        String result = templateRenderer.renderHtml(
+                content,
+                Map.of("userName", "<script>alert('XSS')</script>")
+        );
+
+        assertThat(result).isEqualTo(
+                "<p>Hello &lt;script&gt;alert('XSS')&lt;/script&gt;</p>"
+        );
+    }
+
+    @Test
+    void shouldEscapeAmpersandInHtmlVariables() {
+        String content = "<p>{{companyName}}</p>";
+
+        String result = templateRenderer.renderHtml(
+                content,
+                Map.of("companyName", "Tom & Jerry")
+        );
+
+        assertThat(result).isEqualTo(
+                "<p>Tom &amp; Jerry</p>"
+        );
+    }
+
+    @Test
+    void shouldPreserveHtmlTemplateStructure() {
+        String content = "<h1>Hello {{userName}}</h1><p>Welcome!</p>";
+
+        String result = templateRenderer.renderHtml(
+                content,
+                Map.of("userName", "Rochona")
+        );
+
+        assertThat(result).isEqualTo(
+                "<h1>Hello Rochona</h1><p>Welcome!</p>"
+        );
+    }
+
 }
 
