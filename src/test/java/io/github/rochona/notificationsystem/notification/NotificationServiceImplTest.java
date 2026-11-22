@@ -8,8 +8,11 @@ import io.github.rochona.notificationsystem.notification.exception.NotificationN
 import io.github.rochona.notificationsystem.notification.exception.NotificationNotFoundException;
 import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.repository.NotificationRepository;
-import io.github.rochona.notificationsystem.notification.sender.NotificationSender;
 import io.github.rochona.notificationsystem.notification.service.NotificationServiceImpl;
+import io.github.rochona.notificationsystem.outbox.model.OutboxEvent;
+import io.github.rochona.notificationsystem.outbox.OutboxEventRepository;
+import io.github.rochona.notificationsystem.outbox.enums.OutboxEventStatus;
+import io.github.rochona.notificationsystem.outbox.enums.OutboxEventType;
 import io.github.rochona.notificationsystem.preference.service.PreferenceService;
 import io.github.rochona.notificationsystem.template.exception.TemplateNotFoundException;
 import io.github.rochona.notificationsystem.template.model.Template;
@@ -21,7 +24,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -31,9 +33,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,7 +48,10 @@ public class NotificationServiceImplTest {
     private NotificationRepository notificationRepository;
 
     @Mock
-    private NotificationSender notificationSender;
+    private OutboxEventRepository outboxEventRepository;
+
+//    @Mock
+//    private NotificationSender notificationSender;
 
     @Mock
     private TemplateService templateService;
@@ -121,15 +123,18 @@ public class NotificationServiceImplTest {
         assertEquals("goon.rochona@gmail.com", result.getRecipient());
         assertEquals("testuser101", result.getUserId());
         assertEquals(NotificationChannel.EMAIL, result.getChannel());
-        assertEquals(NotificationStatus.SENT, result.getStatus());
+        assertEquals(NotificationStatus.PENDING, result.getStatus());
         assertSame(tenant, result.getTenant());
         assertNull(result.getHtmlMessage());
 
-        InOrder inOrder = inOrder(notificationRepository, notificationSender);
+        verify(notificationRepository).save(any(Notification.class));
 
-        inOrder.verify(notificationRepository).save(any(Notification.class));
-        inOrder.verify(notificationSender).send(any(Notification.class));
-        inOrder.verify(notificationRepository).save(any(Notification.class));
+        verify(outboxEventRepository).save(argThat(event ->
+                event.getNotification().getId().equals(result.getId())
+                        && event.getEventType() == OutboxEventType.NOTIFICATION_CREATED
+                        && event.getStatus() == OutboxEventStatus.PENDING
+        ));
+
         verifyNoInteractions(templateService, templateRenderer);
 
     }
@@ -167,13 +172,13 @@ public class NotificationServiceImplTest {
         when(templateService.getTemplateEntityById(10L, tenant))
                 .thenReturn(template);
 
-        when(templateRenderer.render(template.getSubject(), variables))
+        when(templateRenderer.renderText(template.getSubject(), variables))
                 .thenReturn("Hello Rochona");
 
-        when(templateRenderer.render(template.getBodyText(), variables))
+        when(templateRenderer.renderText(template.getBodyText(), variables))
                 .thenReturn("Welcome Rochona");
 
-        when(templateRenderer.render(template.getBodyHtml(), variables))
+        when(templateRenderer.renderHtml(template.getBodyHtml(), variables))
                 .thenReturn("<h1>Welcome Rochona</h1>");
 
         when(notificationRepository.save(any(Notification.class)))
@@ -198,76 +203,71 @@ public class NotificationServiceImplTest {
         assertEquals("goon.rochona@gmail.com", result.getRecipient());
         assertEquals("testuser101", result.getUserId());
         assertEquals(NotificationChannel.EMAIL, result.getChannel());
-        assertEquals(NotificationStatus.SENT, result.getStatus());
+        assertEquals(NotificationStatus.PENDING, result.getStatus());
         assertSame(tenant, result.getTenant());
 
         verify(templateService).getTemplateEntityById(10L, tenant);
 
-        verify(templateRenderer).render(template.getSubject(), variables);
-        verify(templateRenderer).render(template.getBodyText(), variables);
-        verify(templateRenderer).render(template.getBodyHtml(), variables);
+        verify(templateRenderer).renderText(template.getSubject(), variables);
+        verify(templateRenderer).renderText(template.getBodyText(), variables);
+        verify(templateRenderer).renderHtml(template.getBodyHtml(), variables);
 
-        verify(notificationSender).send(any(Notification.class));
+        verify(outboxEventRepository).save(argThat(event ->
+                event.getNotification().getId().equals(result.getId())
+                        && event.getEventType() == OutboxEventType.NOTIFICATION_CREATED
+                        && event.getStatus() == OutboxEventStatus.PENDING
+        ));
     }
 
 
     @Test
-    void shouldMarkNotificationAsFailedWhenEmailIsSendingFails(){
+    void shouldSaveNotificationAndOutboxEventSuccessfully() {
 
-        when(notificationRepository.save(any(Notification.class)))
-                .thenAnswer(invocation -> {
-                    Notification notification = invocation.getArgument(0);
-
-                    if(notification.getId() == null)
-                        notification.setId(1L);
-
-                    return notification;
-                });
-
+        // Arrange
         when(preferenceService.isChannelEnabled(
                 tenant.getId(),
                 "testuser101",
                 NotificationChannel.EMAIL
         )).thenReturn(true);
 
-        doThrow(new RuntimeException("Email Delivery Failed"))
-                .when(notificationSender)
-                .send(any(Notification.class));
+        when(notificationRepository.save(any(Notification.class)))
+                .thenAnswer(invocation -> {
+                    Notification notification = invocation.getArgument(0);
 
-        Tenant tenant = new Tenant();
-        tenant.setName("Test tenant");
-        tenant.setId(1L);
+                    if (notification.getId() == null) {
+                        notification.setId(1L);
+                    }
+
+                    return notification;
+                });
 
         NotificationRequestDTO request = new NotificationRequestDTO();
         request.setSubject("Hi");
-        request.setMessage("Hi there, how are you doing?");
-        request.setRecipient("goon.rochona@gmail.com");
+        request.setMessage("Hello there");
+        request.setRecipient("test@gmail.com");
         request.setUserId("testuser101");
         request.setChannel(NotificationChannel.EMAIL);
 
         // Act
-
-        Notification result = notificationService.createNotification(request, tenant);
+        Notification result =
+                notificationService.createNotification(request, tenant);
 
         // Assert
-
         assertNotNull(result);
-        assertEquals(NotificationStatus.FAILED, result.getStatus());
-        assertEquals("Hi", result.getSubject());
-        assertEquals("Hi there, how are you doing?", result.getMessage());
+        assertEquals(NotificationStatus.PENDING, result.getStatus());
 
-        InOrder inOrder = inOrder(notificationRepository, notificationSender);
+        verify(notificationRepository).save(any(Notification.class));
 
-        inOrder.verify(notificationRepository).save(any(Notification.class));
-        inOrder.verify(notificationSender).send(any(Notification.class));
-        inOrder.verify(notificationRepository).save(any(Notification.class));
-        verifyNoInteractions(templateService, templateRenderer);
-
+        verify(outboxEventRepository).save(argThat(event ->
+                event.getNotification().getId().equals(result.getId())
+                        && event.getEventType() == OutboxEventType.NOTIFICATION_CREATED
+                        && event.getStatus() == OutboxEventStatus.PENDING
+        ));
     }
 
 
     @Test
-    void shouldNotCreateNotificationWhenTemplateDoesNotExist() {
+    void shouldThrowExceptionWhenTemplateIsNotFound() {
 
         // Arrange
         NotificationRequestDTO request = new NotificationRequestDTO();
@@ -286,7 +286,7 @@ public class NotificationServiceImplTest {
         );
 
         verify(templateService).getTemplateEntityById(10L, tenant);
-        verifyNoInteractions(templateRenderer, notificationSender);
+        verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
         verify(notificationRepository, never()).save(any(Notification.class));
     }
 
@@ -312,7 +312,7 @@ public class NotificationServiceImplTest {
         when(templateService.getTemplateEntityById(10L, tenant))
                 .thenReturn(template);
 
-        when(templateRenderer.render(template.getSubject(), variables))
+        when(templateRenderer.renderText(template.getSubject(), variables))
                 .thenThrow(new IllegalArgumentException("Missing template variable: name"));
 
         // Act & Assert
@@ -322,10 +322,10 @@ public class NotificationServiceImplTest {
         );
 
         verify(templateService).getTemplateEntityById(10L, tenant);
-        verify(templateRenderer).render(template.getSubject(), variables);
+        verify(templateRenderer).renderText(template.getSubject(), variables);
 
         verify(notificationRepository, never()).save(any(Notification.class));
-        verifyNoInteractions(notificationSender);
+        verifyNoInteractions(outboxEventRepository);
     }
 
 
@@ -367,7 +367,7 @@ public class NotificationServiceImplTest {
         );
 
         verify(notificationRepository).save(any(Notification.class));
-        verifyNoInteractions(notificationSender);
+        verifyNoInteractions(outboxEventRepository);
     }
 
 
@@ -398,12 +398,16 @@ public class NotificationServiceImplTest {
 
         // Assert
         assertNotNull(result);
-        assertEquals(NotificationStatus.SENT, result.getStatus());
+        assertEquals(NotificationStatus.PENDING, result.getStatus());
         assertNull(result.getUserId());
 
         verifyNoInteractions(preferenceService);
-        verify(notificationSender).send(any(Notification.class));
-        verify(notificationRepository, times(2)).save(any(Notification.class));
+        verify(notificationRepository).save(any(Notification.class));
+        verify(outboxEventRepository).save(argThat(event ->
+                event.getNotification().getId().equals(result.getId())
+                        && event.getEventType() == OutboxEventType.NOTIFICATION_CREATED
+                        && event.getStatus() == OutboxEventStatus.PENDING
+        ));
     }
 
 

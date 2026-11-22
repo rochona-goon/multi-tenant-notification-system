@@ -10,6 +10,10 @@ import io.github.rochona.notificationsystem.notification.repository.Notification
 import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.sender.NotificationSender;
 import io.github.rochona.notificationsystem.notification.specification.NotificationSpecification;
+import io.github.rochona.notificationsystem.outbox.model.OutboxEvent;
+import io.github.rochona.notificationsystem.outbox.OutboxEventRepository;
+import io.github.rochona.notificationsystem.outbox.enums.OutboxEventStatus;
+import io.github.rochona.notificationsystem.outbox.enums.OutboxEventType;
 import io.github.rochona.notificationsystem.preference.service.PreferenceService;
 import io.github.rochona.notificationsystem.template.model.Template;
 import io.github.rochona.notificationsystem.template.service.TemplateRenderer;
@@ -21,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -31,17 +36,18 @@ import java.util.List;
 public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
-    private final NotificationSender notificationSender;
     private final TemplateService templateService;
     private final TemplateRenderer templateRenderer;
     private final PreferenceService preferenceService;
+    private final OutboxEventRepository outboxEventRepository;
 
 
     @Override
+    @Transactional
     public Notification createNotification(NotificationRequestDTO request,
                                            Tenant tenant) {
-        // Validations
 
+        // Template Rendering...
         String subject;
         String message;
         String htmlMessage = null;
@@ -52,15 +58,15 @@ public class NotificationServiceImpl implements NotificationService {
                     request.getTemplateId(), tenant
             );
 
-            subject = templateRenderer.render(
+            subject = templateRenderer.renderText(
                     template.getSubject(), request.getVariables()
             );
 
-            message = templateRenderer.render(
+            message = templateRenderer.renderText(
                     template.getBodyText(), request.getVariables()
             );
 
-            htmlMessage = templateRenderer.render(
+            htmlMessage = templateRenderer.renderHtml(
                     template.getBodyHtml(), request.getVariables()
             );
 
@@ -79,31 +85,27 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setUserId(request.getUserId());
         notification.setTenant(tenant);
 
+
+        // Check preference...
         if (request.getUserId() != null && !request.getUserId().isBlank() &&
-        !preferenceService.isChannelEnabled(
-                        tenant.getId(),
-                        request.getUserId(),
-                        request.getChannel()
-                )) {
+        !preferenceService.isChannelEnabled(tenant.getId(), request.getUserId(), request.getChannel())) {
 
             notification.setStatus(NotificationStatus.SUPPRESSED);
-
             return notificationRepository.save(notification);
         }
 
         Notification savedNotification = notificationRepository.save(notification);
 
-        try{
-            notificationSender.send(savedNotification);
-            savedNotification.setStatus(NotificationStatus.SENT);
+        // Create Outbox event...
 
-        } catch (Exception e) {
-            log.error("Failed to send notification with id: {}", savedNotification.getId(), e);
-            savedNotification.setStatus(NotificationStatus.FAILED);
-        }
+        OutboxEvent outboxEvent = new OutboxEvent();
+        outboxEvent.setNotification(savedNotification);
+        outboxEvent.setEventType(OutboxEventType.NOTIFICATION_CREATED);
+        outboxEvent.setStatus(OutboxEventStatus.PENDING);
 
+        outboxEventRepository.save(outboxEvent);
 
-        return notificationRepository.save(savedNotification);
+        return savedNotification;
     }
 
 
