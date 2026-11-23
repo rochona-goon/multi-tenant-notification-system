@@ -10,7 +10,7 @@ import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.repository.NotificationRepository;
 import io.github.rochona.notificationsystem.notification.service.NotificationServiceImpl;
 import io.github.rochona.notificationsystem.outbox.model.OutboxEvent;
-import io.github.rochona.notificationsystem.outbox.OutboxEventRepository;
+import io.github.rochona.notificationsystem.outbox.repository.OutboxEventRepository;
 import io.github.rochona.notificationsystem.outbox.enums.OutboxEventStatus;
 import io.github.rochona.notificationsystem.outbox.enums.OutboxEventType;
 import io.github.rochona.notificationsystem.preference.service.PreferenceService;

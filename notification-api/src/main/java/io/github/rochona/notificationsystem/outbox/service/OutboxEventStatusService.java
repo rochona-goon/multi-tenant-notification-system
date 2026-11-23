@@ -1,7 +1,7 @@
 package io.github.rochona.notificationsystem.outbox.service;
 
 import io.github.rochona.notificationsystem.outbox.enums.OutboxEventStatus;
-import io.github.rochona.notificationsystem.outbox.OutboxEventRepository;
+import io.github.rochona.notificationsystem.outbox.repository.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

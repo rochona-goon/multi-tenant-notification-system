@@ -3,7 +3,7 @@ package io.github.rochona.notificationsystem.integration;
 import io.github.rochona.notificationsystem.notification.enums.NotificationChannel;
 import io.github.rochona.notificationsystem.notification.model.Notification;
 import io.github.rochona.notificationsystem.notification.repository.NotificationRepository;
-import io.github.rochona.notificationsystem.outbox.OutboxEventRepository;
+import io.github.rochona.notificationsystem.outbox.repository.OutboxEventRepository;
 import io.github.rochona.notificationsystem.outbox.dto.ClaimedOutboxEventDto;
 import io.github.rochona.notificationsystem.outbox.enums.OutboxEventStatus;
 import io.github.rochona.notificationsystem.outbox.enums.OutboxEventType;

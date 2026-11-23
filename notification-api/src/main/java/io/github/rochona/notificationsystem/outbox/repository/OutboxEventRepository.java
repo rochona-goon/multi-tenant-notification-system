@@ -1,4 +1,4 @@
-package io.github.rochona.notificationsystem.outbox;
+package io.github.rochona.notificationsystem.outbox.repository;
 
 import io.github.rochona.notificationsystem.outbox.model.OutboxEvent;
 import org.springframework.data.jpa.repository.JpaRepository;

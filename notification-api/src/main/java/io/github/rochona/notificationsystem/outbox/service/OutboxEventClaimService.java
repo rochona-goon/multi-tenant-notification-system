@@ -1,7 +1,7 @@
 package io.github.rochona.notificationsystem.outbox.service;
 
 import io.github.rochona.notificationsystem.outbox.model.OutboxEvent;
-import io.github.rochona.notificationsystem.outbox.OutboxEventRepository;
+import io.github.rochona.notificationsystem.outbox.repository.OutboxEventRepository;
 import io.github.rochona.notificationsystem.outbox.dto.ClaimedOutboxEventDto;
 import io.github.rochona.notificationsystem.outbox.enums.OutboxEventStatus;
 import lombok.RequiredArgsConstructor;

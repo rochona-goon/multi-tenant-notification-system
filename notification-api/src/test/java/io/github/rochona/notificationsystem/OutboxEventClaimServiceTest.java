@@ -5,7 +5,7 @@ import io.github.rochona.notificationsystem.outbox.dto.ClaimedOutboxEventDto;
 import io.github.rochona.notificationsystem.outbox.service.OutboxEventClaimService;
 import io.github.rochona.notificationsystem.outbox.enums.OutboxEventStatus;
 import io.github.rochona.notificationsystem.outbox.model.OutboxEvent;
-import io.github.rochona.notificationsystem.outbox.OutboxEventRepository;
+import io.github.rochona.notificationsystem.outbox.repository.OutboxEventRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
