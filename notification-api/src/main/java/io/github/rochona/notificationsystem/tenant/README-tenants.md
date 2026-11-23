@@ -1,160 +1,194 @@
-# Phase 3 – Tenant Management, API-Key Authentication & Tenant Isolation
+# Tenant & Security Module
 
-## Overview
+## 1. Overview
 
-This phase extends the notification system to support multiple tenants with API-key-based authentication and tenant-level data isolation.
+The Tenant module provides tenant registration, API-key authentication, and tenant isolation for the Notification API.
 
-Each tenant receives a unique API key during registration. Authenticated tenants can create, retrieve and delete only their own notifications.
+The application follows a multi-tenant model: each registered tenant represents an organization using the notification platform. API requests that require tenant authentication are associated with the tenant identified by the supplied API key.
 
-## Features Implemented
+The module is responsible for:
 
-### 1. Tenant Registration
+- Registering tenants.
+- Generating tenant API keys.
+- Hashing API keys before persistence.
+- Authenticating incoming API requests.
+- Resolving the authenticated tenant for downstream application services.
+- Supporting tenant-scoped access to notification-related resources.
 
-- Implemented `Tenant` entity and `TenantRepository`.
-- Implemented tenant registration through `TenantService`.
-- Added `TenantController` to expose tenant registration through a REST API.
-- Added request validation for tenant names.
+Tenant identity is established at the API boundary and is used by other modules to restrict access to tenant-owned data.
 
-**Endpoint:**
-
-`POST /tenants/signUp`
-
-The registration response contains:
-- Tenant ID
-- Tenant name
-- Generated API key
-
-The raw API key is returned only during registration.
-
-### 2. Secure API-Key Generation and Storage
-
-- Implemented API-key generation using Java's `SecureRandom`.
-- Generated 256-bit random API keys.
-- Added the `ntf_live_` prefix.
-- Implemented SHA-256 hashing using `ApiKeyHasher`.
-- Only hashed API keys are stored in PostgreSQL.
-- Raw API keys are returned to the client during registration and are not persisted.
-
-### 3. Tenant Authentication
-
-Implemented `TenantAuthenticationService` to authenticate tenants using their API keys.
-
-Authentication flow:
-
-1. Extract the API key from the `X-API-Key` request header.
-2. Validate that the API key is present.
-3. Hash the supplied API key.
-4. Find the tenant using the stored API-key hash.
-5. Return the authenticated tenant or throw `InvalidApiKeyException`.
-
-### 4. Tenant Authentication Interceptor
-
-Implemented `TenantAuthenticationInterceptor` using Spring MVC's `HandlerInterceptor`.
-
-Responsibilities:
-
-- Extract the API key from incoming requests.
-- Authenticate the tenant.
-- Store the authenticated tenant in the request attribute `authenticatedTenant`.
-
-Registered the interceptor through `WebMvcConfig` to protect `/notifications` endpoints.
-
-### 5. Notification-Tenant Association
-
-Updated the `Notification` entity to establish a many-to-one relationship with `Tenant`.
-
-- Added the `tenant_id` foreign key.
-- Associated notifications with their owning tenant.
-- Updated notification creation to use the authenticated tenant.
-
-### 6. Tenant Data Isolation
-
-Implemented tenant-scoped notification operations.
-
-- Fetch all notifications belonging to the authenticated tenant.
-- Fetch a notification using both its ID and tenant.
-- Delete notifications using notification ID, tenant and notification status.
-- Prevent access to notifications belonging to other tenants.
-
-A tenant attempting to access another tenant's notification receives a notification-not-found response.
-
-### 7. Exception Handling
-
-Added exception handling for:
-
-- Missing or invalid API keys – `401 Unauthorized`.
-- Notifications not found for the authenticated tenant – `404 Not Found`.
-- Notifications that cannot be deleted – `409 Conflict`.
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/tenants/signUp` | Register a tenant |
-| POST | `/notifications/create` | Create a notification |
-| GET | `/notifications` | Fetch all notifications belonging to the authenticated tenant |
-| GET | `/notifications/{id}` | Fetch a notification by ID |
-| DELETE | `/notifications/{id}` | Delete a pending notification |
-
-### Authentication
-
-All notification endpoints require the following request header:
+## 2. Package Structure
 
 ```text
-X-API-Key: <your-tenant-api-key>
+tenant/
+├── config/
+│   └── WebMvcConfig
+├── controller/
+│   └── TenantController
+├── dto/
+│   ├── TenantRegistrationRequest
+│   └── TenantRegistrationResponse
+├── exception/
+│   └── InvalidApiKeyException
+├── model/
+│   └── Tenant
+├── repository/
+│   └── TenantRepository
+├── security/
+│   ├── ApiKeyGenerator
+│   ├── ApiKeyHasher
+│   └── TenantAuthenticationInterceptor
+├── service/
+│   ├── TenantAuthenticationService
+│   └── TenantService
+└── README-tenants.md
 ```
 
-Tenant registration does not require API-key authentication.
+### Component Responsibilities
 
-## Testing
+| Package / Component | Responsibility |
+| --- | --- |
+| `config/WebMvcConfig` | Configures MVC integration for the tenant authentication interceptor. |
+| `controller/TenantController` | Exposes tenant registration endpoints. |
+| `dto/TenantRegistrationRequest` | Defines the data required to register a tenant. |
+| `dto/TenantRegistrationResponse` | Defines the registration response, including the generated API key as appropriate. |
+| `exception/InvalidApiKeyException` | Represents an API-key authentication failure. |
+| `model/Tenant` | Stores tenant information and the persisted API-key hash. |
+| `repository/TenantRepository` | Performs tenant persistence and lookup operations. |
+| `security/ApiKeyGenerator` | Generates a new API key for a tenant. |
+| `security/ApiKeyHasher` | Hashes API keys before they are stored or compared. |
+| `security/TenantAuthenticationInterceptor` | Intercepts protected requests and initiates tenant authentication. |
+| `service/TenantAuthenticationService` | Validates an API key and resolves the corresponding tenant. |
+| `service/TenantService` | Implements tenant registration and related business logic. |
 
-Automated tests were implemented using:
+## 3. Tenant Registration
 
-- JUnit 5
-- Mockito
-- AssertJ
-- Spring Boot Test
-- MockMvc
+Tenant registration is handled by `TenantController` and `TenantService`.
 
-Test coverage includes:
+The registration process:
 
-- Tenant registration and request validation.
-- API-key generation and hashing.
-- Valid, invalid and missing API-key authentication.
+1. Accepts tenant registration information through `TenantRegistrationRequest`.
+2. Creates a new API key using `ApiKeyGenerator`.
+3. Hashes the generated API key using `ApiKeyHasher`.
+4. Persists the tenant and API-key hash through `TenantRepository`.
+5. Returns the registration result using `TenantRegistrationResponse`.
+
+The raw API key is returned to the tenant during registration. The database stores the hash rather than the raw API key.
+
+**Important:** The raw API key should be treated as a secret and securely retained by the tenant. It should not be logged or stored in source control.
+
+> Refer to `TenantController` for the exact registration endpoint, HTTP method, request fields, and response status.
+
+## 4. API-Key Authentication
+
+The Tenant module uses API-key authentication for tenant-facing API requests.
+
+### Authentication Flow
+
+1. A client sends an API request with its tenant API key in the configured request header.
+2. `TenantAuthenticationInterceptor` intercepts the request.
+3. The interceptor delegates authentication to `TenantAuthenticationService`.
+4. The authentication service hashes the supplied key using `ApiKeyHasher`.
+5. The service looks up the tenant associated with the hash.
+6. If the key is valid, the authenticated tenant is made available to downstream request handling.
+7. If the key is missing or invalid for a protected endpoint, authentication fails with `InvalidApiKeyException`.
+
+The exact header name and endpoint exclusions are configured in the authentication implementation and MVC configuration.
+
+## 5. Tenant Context and Isolation
+
+After successful authentication, the request is associated with the authenticated tenant.
+
+Other modules use this tenant context to scope operations, including:
+
 - Notification creation and retrieval.
-- Tenant-scoped notification retrieval.
-- Cross-tenant access rejection.
-- Successful deletion of pending notifications.
-- Rejection of deletion for non-pending notifications.
-- Exception handling.
-- Mailpit email integration.
+- Template management and template lookup.
+- Preference management.
+- Outbox-related notification processing where tenant ownership is relevant.
 
-**Test execution result: 36 tests passed.**
+Tenant-scoped service and repository operations must use the authenticated tenant rather than trusting a tenant identifier supplied by the client in a request body or query parameter.
 
-## Deferred Integration Testing
+This prevents one tenant from accessing or modifying another tenant's resources through tenant-owned API operations.
 
-Comprehensive integration testing will be performed during a dedicated testing phase after core feature development.
+## 6. Tenant-Based Rate Limiting
 
-Planned coverage:
+The Notification API applies rate limiting to the notification creation endpoint using the tenant API key as the tenant identifier.
 
-- PostgreSQL integration testing using Testcontainers.
-- RabbitMQ integration testing using Testcontainers.
-- Repository-level tenant-isolation verification.
-- Integration testing across application components.
+This makes the rate limit tenant-specific rather than relying only on a shared global request limit. Requests are associated with the authenticated tenant's API key, allowing the application to control notification creation usage per tenant.
 
-## Phase 3 Completion Status
+The rate limiter protects the notification creation endpoint from excessive request volume and helps prevent one tenant from consuming disproportionate API capacity.
 
-- [x] Tenant registration
-- [x] Secure API-key generation
-- [x] API-key hashing and storage
-- [x] Tenant authentication service
-- [x] Authentication interceptor
-- [x] Notification-tenant association
-- [x] Tenant-scoped notification retrieval
-- [x] Tenant-scoped notification deletion
-- [x] Exception handling
-- [x] Controller and service unit tests
-- [x] Full test suite – 36 tests passed
-- [ ] Comprehensive Testcontainers-based integration testing (deferred)
+The exact request limit, time window, and rate-limiting implementation are defined in the notification module's configuration and code.
 
-**Phase 3: Core implementation completed.**
+## 7. API-Key Storage and Security
+
+### Hashing
+
+The application persists a hash of the API key in the `Tenant` entity rather than storing the raw key.
+
+`ApiKeyHasher` is responsible for producing the value used for persistence and authentication lookup.
+
+The exact hashing algorithm and encoding should be documented from the current `ApiKeyHasher` implementation.
+
+### Secret Handling
+
+- Do not log raw API keys.
+- Do not commit API keys to source control.
+- Store tenant API keys securely on the client side.
+- Avoid returning the raw API key after the registration response unless the API explicitly supports a secure key-rotation workflow.
+- Restrict database access to protect persisted API-key hashes.
+
+### Authentication Failure
+
+`InvalidApiKeyException` represents an invalid API key. The application's global exception handler defines the resulting HTTP status and error response format.
+
+## 8. Configuration
+
+Tenant authentication is integrated with Spring MVC through `WebMvcConfig`.
+
+Review the configuration and interceptor implementation for:
+
+- The API-key request header name.
+- Which paths require authentication.
+- Which paths are excluded, such as tenant registration.
+- The request attribute used to expose the authenticated tenant.
+- The handling of missing or invalid API keys.
+
+These values should match the current application configuration.
+
+## 9. Integration with Other Modules
+
+The Tenant module is a foundational module used by the rest of the Notification API.
+
+| Module | Tenant integration |
+| --- | --- |
+| Notifications | Associates notifications with the authenticated tenant and enforces tenant-scoped access. |
+| Templates | Restricts template creation, retrieval, updates, and rendering lookup to the owning tenant. |
+| Preferences | Stores and manages preferences within the authenticated tenant's scope. |
+| Outbox | Publishes events for notification records created within the tenant context; delivery processing uses notification identity and persisted ownership. |
+
+Tenant authentication and tenant authorization are complementary: authentication establishes which tenant is making the request, while tenant-scoped service operations ensure that the tenant can access only its own resources.
+
+## 10. Testing
+
+Tenant-related tests should verify:
+
+- Successful tenant registration.
+- API-key generation and hashing.
+- Raw API key is not persisted.
+- Successful authentication with a valid API key.
+- Rejection of invalid or missing API keys on protected routes.
+- Correct interceptor registration and endpoint exclusions.
+- Tenant context is available to downstream handlers.
+- Tenant-scoped operations cannot access another tenant's resources.
+
+The application uses JUnit 5, Mockito, and MockMvc for automated testing.
+
+## 11. Future Security Considerations
+
+Potential enhancements include:
+
+- API-key rotation and revocation.
+- Key creation and last-used auditing.
+- Additional tenant-level quotas.
+- More granular tenant roles and permissions if the product requires user-level access within an organization.

@@ -367,11 +367,22 @@ This separation keeps template management and rendering logic independent of not
 
 Template rendering supports HTML content, so HTML variable substitution requires special care.
 
-**Important production-readiness item:** HTML-context escaping of template variables must be implemented in `TemplateRenderer` before HTML templates are used with untrusted dynamic values in production.
+### HTML-Context Escaping
 
-Values inserted into HTML must be escaped according to their output context to prevent HTML injection and cross-site scripting risks.
+`TemplateRenderer` provides separate rendering methods for plain-text and HTML content:
 
-Until this is implemented, HTML variable substitution should not be treated as production-safe.
+- `renderText()` renders text content, including the email subject and plain-text body.
+- `renderHtml()` renders HTML content.
+
+The HTML renderer uses OWASP Java Encoder's `Encode.forHtmlContent()` to escape dynamic variable values before inserting them into HTML content. This helps prevent a variable value containing HTML markup or script content from being interpreted as executable HTML.
+
+For example, a value such as `<script>alert(1)</script>` is rendered as escaped text in an HTML content context rather than as a script element.
+
+This escaping applies to **dynamic variable values**. Template HTML itself is tenant-managed content and is treated as trusted template markup. Escaping variables does not sanitize or make arbitrary template markup safe.
+
+HTML content escaping is specific to the HTML content context. Values used in other contexts, such as HTML attributes, URLs, CSS, or JavaScript, require appropriate context-specific validation or encoding.
+
+The separate renderer methods ensure that plain-text content is rendered without HTML encoding, while HTML content receives HTML-context escaping.
 
 ## 11. Testing
 
@@ -387,7 +398,6 @@ The relevant test technologies include:
 
 Potential production-oriented improvements include:
 
-- HTML-context escaping for rendered variables.
 - More advanced template validation.
 - Template preview functionality.
 - Additional notification channel-specific template formats where required.

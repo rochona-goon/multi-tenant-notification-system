@@ -2,14 +2,16 @@
 
 ## 1. Overview
 
-The Notifications module is responsible for creating, sending, retrieving, filtering, and managing notifications within the Multi-tenant Notification System.
+The Notifications module is responsible for creating, retrieving, filtering, and managing notifications within the Multi-tenant Notification System. Notification delivery is processed asynchronously by the separate Delivery Worker application.
 
-It supports multiple notification channels and allows tenants to create notifications using either:
+Tenants can create notifications using either:
 
 - Direct notification content supplied in the API request.
 - Reusable notification templates with dynamic variable substitution.
 
 Every notification is associated with a tenant. Tenant identification is handled through API-key authentication, and the authenticated tenant is made available to the controller through the `authenticatedTenant` request attribute.
+
+For notifications that are eligible for delivery, the API persists the notification and its OutboxEvent in the same database transaction. A scheduled Outbox Publisher later publishes the notification ID to RabbitMQ. The Delivery Worker consumes the message and performs the delivery attempt.
 
 The module also supports:
 
@@ -18,6 +20,7 @@ The module also supports:
 - Pagination and filtering.
 - Retrieval of individual notifications.
 - Conditional notification deletion.
+- Preference-based suppression before an OutboxEvent is created.
 
 ## 2. Package Structure
 
@@ -70,7 +73,7 @@ notification/
 | `exception`     | Contains notification-specific exceptions.                                    |
 | `model`         | Contains the Notification JPA entity.                                         |
 | `repository`    | Handles notification persistence and retrieval.                               |
-| `sender`        | Defines the notification sending abstraction and email sender implementation. |
+| `sender`        | Contains notification-sending abstractions/implementations present in the API codebase; notification creation now queues eligible work rather than invoking a sender synchronously. |
 | `service`       | Implements notification creation, retrieval, filtering, and deletion.         |
 | `specification` | Builds dynamic database queries for notification filtering.                   |
 
@@ -82,47 +85,63 @@ The system defines the following notification channels through `NotificationChan
 - `SMS`
 - `PUSH`
 
-The channel is supplied when creating a notification and stored with the notification record.
+The requested channel is stored with the notification.
 
-The current sender implementation shown in the package structure includes `EmailNotificationSender`, which implements the `NotificationSender` abstraction.
+**Current delivery capability:** the Delivery Worker currently implements email delivery. Although `SMS` and `PUSH` are represented in the channel model, their delivery implementations are not part of the current Phase 5 workflow. A notification using an unsupported channel will fail during Worker processing rather than being delivered by the current email implementation.
 
-The interface provides a boundary between notification management and the actual delivery mechanism.
+The Notification API accepts and persists eligible notification requests; the Worker owns the actual delivery operation.
 
 ## 4. Notification Status
 
 The notification lifecycle is represented by `NotificationStatus`.
 
-The statuses used by the current implementation are:
+| Status | Description |
+| --- | --- |
+| `PENDING` | The notification has been persisted and is waiting for asynchronous processing, or remains pending for another delivery attempt. |
+| `SUPPRESSED` | The requested channel is disabled in the user's tenant-scoped preferences; no OutboxEvent is created and delivery is skipped. |
+| `SENT` | The Worker completed the email send operation successfully. This reflects successful sending by the configured mail transport, not an end-recipient read confirmation. |
+| `FAILED` | The notification reached a terminal delivery failure, such as retry exhaustion or a non-retryable failure routed to the dead-letter queue. Individual failed attempts are recorded in `NotificationAttempt`. |
+| `DELIVERED` | Present in the status model; the current Worker flow does not set this status as a separate post-send confirmation. |
 
-| Status      | Description                                                      |
-| ----------- | ---------------------------------------------------------------- |
-| `PENDING`    | Initial status assigned to a newly created notification.                         |
-| `SUPPRESSED` | The requested channel is disabled in the user's preferences; sending is skipped. |
-| `SENT`       | The notification sender completed without throwing an exception.                 |
-| `FAILED`     | An exception occurred during the sending attempt.                                 |
-| `DELIVERED`  | Represents successful delivery confirmation; not currently set by this workflow. |
-
-### Current Status Transition
-
-The current implementation sends notifications synchronously during notification creation.
+### Asynchronous Status Flow
 
 ```text
-                Notification Created
-                        |
-                        v
-                     PENDING
-                        |
-                        v
-                 Attempt Sending
-                   /        \
-                  /          \
-             Success        Exception
-                |               |
-                v               v
-              SENT            FAILED
+              Notification Request
+                      |
+                      v
+            Check User Preference
+                /           \
+          Disabled          Enabled / no preference
+              |                    |
+              v                    v
+         SUPPRESSED          Save Notification
+                                   |
+                                   v
+                            Create OutboxEvent
+                                   |
+                                   v
+                                PENDING
+                                   |
+                       Outbox Publisher / RabbitMQ
+                                   |
+                                   v
+                         Delivery Worker attempt
+                            /              \
+                       Success            Failure
+                          |                  |
+                          v                  v
+                        SENT       Attempt marked FAILED
+                                     | retry queue (5s, then 10s)
+                                     | retry exhausted / non-retryable
+                                     v
+                                   FAILED (DLQ)
 ```
 
-`DELIVERED` is part of the status model, but the supplied `NotificationServiceImpl` does not currently transition notifications to this status.
+A notification is initially persisted as `PENDING`. The API does not synchronously send the email or wait for the Worker to finish before returning the creation response.
+
+The Worker records each delivery attempt in the `NotificationAttempt` table. A failed attempt is marked `FAILED` with an error message. Retryable failures are routed through the configured retry queues (5-second and 10-second delays); terminal or non-retryable failures are routed to the dead-letter queue and the notification is marked `FAILED`. A later successful attempt updates the notification to `SENT`.
+
+`DELIVERED` is part of the status model, but the current workflow does not set it as a separate delivery-receipt status.
 
 ## 5. API Endpoints
 
@@ -138,7 +157,7 @@ All endpoints require tenant authentication. The authenticated tenant is obtaine
 
 **Description:**
 
-Creates and sends a notification for the authenticated tenant.
+Creates a notification for the authenticated tenant and, when it is eligible for delivery, queues it for asynchronous processing. The API does not send the email during this request.
 
 The API supports two notification creation modes.
 
@@ -160,22 +179,21 @@ The service:
 4. Renders the HTML body.
 5. Creates the notification using the rendered content.
 6. Checks the user's channel preference when `userId` is supplied.
-7. Saves the notification. If the requested channel is disabled, it is saved as `SUPPRESSED` and delivery stops here.
-8. If delivery is allowed, invokes `NotificationSender`.
-9. Updates its status to `SENT` or `FAILED`.
-10. Saves the updated notification.
+7. If the requested channel is disabled, saves the notification as `SUPPRESSED` and does not create an OutboxEvent.
+8. If delivery is allowed, saves the notification and creates a `NOTIFICATION_CREATED` OutboxEvent in the same database transaction.
+9. Returns the saved notification, normally with status `PENDING`; the Outbox Publisher and Delivery Worker process it asynchronously.
 
 The template lookup is tenant-scoped, so a tenant cannot use another tenant's template.
 
 #### Preference Check
 
-After the notification content and tenant association are populated, `NotificationServiceImpl` checks the user's preference before saving for delivery:
+After the notification content and tenant association are populated, `NotificationServiceImpl` checks the user's preference before creating an OutboxEvent:
 
 - If `userId` is absent, preference checking is skipped.
 - If `userId` is supplied, the preference is looked up using both the authenticated tenant ID and the supplied `userId`.
 - If no preference record exists, the channel is treated as enabled by default and normal delivery continues.
 - If the requested channel is enabled, normal delivery continues.
-- If the requested channel is disabled, the notification is saved with status `SUPPRESSED` and `NotificationSender` is not invoked.
+- If the requested channel is disabled, the notification is saved with status `SUPPRESSED`, no OutboxEvent is created, and no delivery message is published.
 
 This check is performed for the notification's requested channel (`EMAIL`, `SMS`, or `PUSH`). A suppressed notification remains in notification history independently of the preference record.
 
@@ -254,6 +272,8 @@ The endpoint returns a `NotificationResponseDTO`.
 | `notificationStatus` | NotificationStatus  | Current notification status.              |
 
 The creation controller explicitly maps all these fields from the saved notification.
+
+For an eligible notification, the returned status is typically `PENDING` because delivery is asynchronous. The response confirms that the notification was accepted and persisted; it does not confirm that the email has already been sent. A preference-suppressed notification is returned with status `SUPPRESSED`.
 
 ### 5.2 Get All Notifications
 
@@ -391,9 +411,9 @@ For individual retrieval and deletion, repository methods explicitly include the
 
 This prevents one tenant from accessing or modifying another tenant's notification records.
 
-## 7. Notification Creation and Delivery Flow
+## 7. Notification Creation and Asynchronous Delivery Flow
 
-The current notification creation flow is:
+The Phase 5 workflow separates accepting a notification request from performing the delivery attempt.
 
 ```text
 Tenant Application
@@ -411,89 +431,115 @@ NotificationController
 NotificationServiceImpl
        |
        v
-Determine Request Mode
+Resolve Direct Content or Render Template
        |
-       +----------------------+
-       |                      |
-       v                      v
- Direct Content          Template Mode
-       |                      |
-       |                Retrieve Template
-       |                      |
-       |                Render Variables
-       |                      |
-       +----------+-----------+
-                  |
-                  v
-          Create Notification
-                  |
-                  v
-          Save Notification
-                  |
-                  v
-          NotificationSender
-                  |
-             +----+----+
-             |         |
-             v         v
-          Success   Exception
-             |         |
-             v         v
-            SENT     FAILED
-             |         |
-             +----+----+
-                  |
-                  v
-        Save Updated Notification
-                  |
-                  v
-           Return Response
+       v
+Check Tenant-scoped User Preference
+       |
+       +--------------------------+
+       |                          |
+       v                          v
+ Channel Disabled            Delivery Allowed
+       |                          |
+       v                          v
+ Save SUPPRESSED          Begin Database Transaction
+ No OutboxEvent                  |
+                                 v
+                         Save Notification
+                                 |
+                                 v
+                         Save OutboxEvent
+                    (same transaction)
+                                 |
+                                 v
+                         Commit Transaction
+                                 |
+                                 v
+                       Return API Response
+                                 |
+                                 v
+                    Scheduled Outbox Publisher
+                                 |
+                                 v
+                         RabbitMQ Exchange
+                                 |
+                                 v
+                         Delivery Queue
+                                 |
+                                 v
+                        Delivery Worker
+                                 |
+                                 v
+                       Load Notification
+                                 |
+                                 v
+                       Create Attempt Record
+                                 |
+                                 v
+                         Send Email
+                         /         \
+                    Success       Failure
+                       |             |
+                       v             v
+                 Notification   Attempt FAILED
+                    SENT        Message requeued
 ```
+
+The API stores the notification and corresponding OutboxEvent atomically. If the transaction fails, neither record is committed. The Outbox Publisher reads eligible outbox records and publishes the notification ID to RabbitMQ. After a positive publisher confirmation and routability check, the outbox event is marked `PUBLISHED`.
+
+RabbitMQ carries the notification ID as a string message body. The Worker loads the notification from the shared PostgreSQL database, performs the delivery operation, records the attempt result, and acknowledges the message after successful processing. The Worker uses configured retry queues for retryable failures and a dead-letter queue for terminal or non-retryable failures. It acknowledges the original message only after the retry/DLQ routing and any required notification status update succeed; if routing fails, the original message is requeued.
+
+Publisher confirmation and message acknowledgement represent different stages:
+
+- **Publisher confirmation:** RabbitMQ confirms the broker accepted the published message.
+- **Consumer acknowledgement:** the Worker confirms that it successfully processed the message.
+- Neither event is an end-recipient read receipt.
 
 ## 8. Persistence and Querying
 
-`NotificationRepository` is responsible for persistence and database queries.
+`NotificationRepository` is responsible for notification persistence and database queries.
 
-The service uses repository operations for:
+The Notification API uses repository operations for:
 
 - Saving newly created notifications, including notifications suppressed by user preferences.
-- Saving the notification after an allowed sending attempt.
+- Saving the eligible notification as `PENDING` before asynchronous processing.
 - Retrieving tenant-scoped notification pages using JPA Specifications.
 - Retrieving a notification by ID and tenant.
 - Deleting a notification conditionally by ID, tenant, and status.
 
-The `NotificationSpecification` class keeps dynamic query construction separate from the service implementation.
+For an eligible notification, `NotificationServiceImpl` saves the Notification and the related OutboxEvent within one transaction. The OutboxEvent records that a notification was created and provides the publisher with the notification ID to send to RabbitMQ.
 
-This makes it possible to combine optional filters while preserving the mandatory tenant restriction.
+The Delivery Worker shares the PostgreSQL database and updates the notification status after delivery processing. It also persists individual delivery attempts in `NotificationAttempt`, allowing attempt history and failure information to be recorded separately from the notification's current status.
+
+The `NotificationSpecification` class keeps dynamic query construction separate from the service implementation. It allows optional filters to be combined while preserving the mandatory tenant restriction.
 
 ## 9. Testing
 
-The Notifications module is tested using:
+The Notification API project uses:
 
 - JUnit 5
 - Mockito
+- AssertJ
 - MockMvc
 
-The project also includes a `MailpitIntegrationTest` to verify email sending against the local Mailpit SMTP environment.
-We'll implement real SMTP-based email delivery as part of the production-oriented evolution of this project.
+The Notification module tests cover the implemented creation, validation, retrieval, deletion, pagination, and filtering behavior. Creation tests also verify preference-based suppression, delivery eligibility when a channel is enabled, and bypassing preference checks when `userId` is absent.
 
-
-The notification tests cover the implemented creation, validation, retrieval, deletion, pagination, and filtering behavior. Creation tests also verify preference-based suppression, delivery when a channel is enabled, and bypassing preference checks when `userId` is absent.
+Phase 5 tests additionally cover the API's transactional outbox behavior and the publisher's handling of RabbitMQ confirmations, unroutable messages, and retry scheduling. The separate Delivery Worker project has its own tests for message consumption, delivery processing, attempt tracking, and notification status updates.
 
 ## 10. Current Implementation and Future Evolution
 
-The current implementation performs notification sending synchronously within the notification creation service.
+The Phase 5 implementation uses asynchronous notification processing:
 
-This means the API request remains open while the sending operation is performed.
+- The Notification API accepts and persists notification requests.
+- The Notification and OutboxEvent are saved in the same transaction for eligible notifications.
+- A scheduled publisher publishes pending outbox events to RabbitMQ.
+- The separate Delivery Worker consumes notification-ID messages using manual acknowledgement.
+- The Worker currently delivers email notifications through the configured JavaMailSender.
+- Delivery attempts are stored separately; successful sending updates the notification status to `SENT`, while terminal delivery failure updates it to `FAILED`.
 
-As part of Phase 5, notification delivery is planned to evolve into an asynchronous workflow using:
+The channel model includes `EMAIL`, `SMS`, and `PUSH`; however, SMS and push delivery are not implemented in the current Worker workflow.
 
-- RabbitMQ for message publishing and consumption.
-- A separate Spring Boot Delivery Worker.
-- Asynchronous delivery processing.
-- Notification status updates after delivery attempts.
-
-The existing `NotificationSender` abstraction provides a boundary for the delivery implementation to evolve without placing channel-specific sending logic directly in the controller.
+The OutboxEvent publisher, event claiming, publisher confirmation, and retry strategy are documented in the dedicated OutboxEvent README. Worker-specific configuration and message-processing details will be covered in the Delivery Worker README.
 
 ## 11. Implementation Notes
 
