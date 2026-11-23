@@ -1,160 +1,319 @@
-# Phase 3 – Tenant Management, API-Key Authentication & Tenant Isolation
+# Multi-tenant Notification System — Notification API
 
-## Overview
+## 1. Overview
 
-This phase extends the notification system to support multiple tenants with API-key-based authentication and tenant-level data isolation.
+The Notification API is the main application of the Multi-tenant Notification System. It is built as a Spring Boot modular monolith and provides tenant registration and authentication, notification management, reusable templates, tenant-scoped user preferences, rate limiting, and asynchronous delivery coordination.
 
-Each tenant receives a unique API key during registration. Authenticated tenants can create, retrieve and delete only their own notifications.
+The API accepts notification requests, validates and associates them with the authenticated tenant, applies the tenant's notification preferences, and persists notification data. For notifications eligible for delivery, it writes an outbox event in the same database transaction. The outbox publisher then publishes a notification-ID message to RabbitMQ for the separate Delivery Worker.
 
-## Features Implemented
+The Notification API and Delivery Worker are separate Spring Boot applications. They share PostgreSQL and communicate through RabbitMQ.
 
-### 1. Tenant Registration
-
-- Implemented `Tenant` entity and `TenantRepository`.
-- Implemented tenant registration through `TenantService`.
-- Added `TenantController` to expose tenant registration through a REST API.
-- Added request validation for tenant names.
-
-**Endpoint:**
-
-`POST /tenants/signUp`
-
-The registration response contains:
-- Tenant ID
-- Tenant name
-- Generated API key
-
-The raw API key is returned only during registration.
-
-### 2. Secure API-Key Generation and Storage
-
-- Implemented API-key generation using Java's `SecureRandom`.
-- Generated 256-bit random API keys.
-- Added the `ntf_live_` prefix.
-- Implemented SHA-256 hashing using `ApiKeyHasher`.
-- Only hashed API keys are stored in PostgreSQL.
-- Raw API keys are returned to the client during registration and are not persisted.
-
-### 3. Tenant Authentication
-
-Implemented `TenantAuthenticationService` to authenticate tenants using their API keys.
-
-Authentication flow:
-
-1. Extract the API key from the `X-API-Key` request header.
-2. Validate that the API key is present.
-3. Hash the supplied API key.
-4. Find the tenant using the stored API-key hash.
-5. Return the authenticated tenant or throw `InvalidApiKeyException`.
-
-### 4. Tenant Authentication Interceptor
-
-Implemented `TenantAuthenticationInterceptor` using Spring MVC's `HandlerInterceptor`.
-
-Responsibilities:
-
-- Extract the API key from incoming requests.
-- Authenticate the tenant.
-- Store the authenticated tenant in the request attribute `authenticatedTenant`.
-
-Registered the interceptor through `WebMvcConfig` to protect `/notifications` endpoints.
-
-### 5. Notification-Tenant Association
-
-Updated the `Notification` entity to establish a many-to-one relationship with `Tenant`.
-
-- Added the `tenant_id` foreign key.
-- Associated notifications with their owning tenant.
-- Updated notification creation to use the authenticated tenant.
-
-### 6. Tenant Data Isolation
-
-Implemented tenant-scoped notification operations.
-
-- Fetch all notifications belonging to the authenticated tenant.
-- Fetch a notification using both its ID and tenant.
-- Delete notifications using notification ID, tenant and notification status.
-- Prevent access to notifications belonging to other tenants.
-
-A tenant attempting to access another tenant's notification receives a notification-not-found response.
-
-### 7. Exception Handling
-
-Added exception handling for:
-
-- Missing or invalid API keys – `401 Unauthorized`.
-- Notifications not found for the authenticated tenant – `404 Not Found`.
-- Notifications that cannot be deleted – `409 Conflict`.
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/tenants/signUp` | Register a tenant |
-| POST | `/notifications/create` | Create a notification |
-| GET | `/notifications` | Fetch all notifications belonging to the authenticated tenant |
-| GET | `/notifications/{id}` | Fetch a notification by ID |
-| DELETE | `/notifications/{id}` | Delete a pending notification |
-
-### Authentication
-
-All notification endpoints require the following request header:
+## 2. Architecture
 
 ```text
-X-API-Key: <your-tenant-api-key>
+Tenant Client
+    |
+    | HTTP request + tenant API key
+    v
+Notification API (Spring Boot modular monolith)
+    |
+    ├── Tenant & Security
+    ├── Notification
+    ├── Template
+    ├── Preference
+    ├── Rate Limiting
+    └── Transactional Outbox
+             |
+             | notification ID
+             v
+          RabbitMQ
+             |
+             v
+      Delivery Worker
+             |
+             ├── Load notification from PostgreSQL
+             ├── Track delivery attempts
+             └── Send email through SMTP
 ```
 
-Tenant registration does not require API-key authentication.
+### Main Design Decisions
 
-## Testing
+- The Notification API is a modular monolith, not a collection of API microservices.
+- Delivery execution is separated into its own Spring Boot Worker application.
+- PostgreSQL is shared by the API and Worker.
+- RabbitMQ decouples API request processing from delivery execution.
+- The Transactional Outbox Pattern keeps notification persistence and event persistence atomic.
+- Tenant isolation is enforced using API-key authentication and tenant-scoped operations.
 
-Automated tests were implemented using:
+## 3. Technology Stack
+
+| Technology | Purpose |
+| --- | --- |
+| Java 21 | Application runtime |
+| Spring Boot | API and Worker application framework |
+| Spring Web / Spring MVC | REST API and request handling |
+| Spring Data JPA / Hibernate | Persistence and ORM |
+| PostgreSQL | Shared application database |
+| RabbitMQ | Asynchronous notification delivery messaging |
+| Mailpit | Local SMTP email capture and testing |
+| Bucket4j | In-memory tenant-based rate limiting |
+| JUnit 5 | Automated testing |
+| Mockito | Unit-test mocking |
+| MockMvc | Controller/API testing |
+| Testcontainers | Integration testing with containerized dependencies |
+| Maven | Build and dependency management |
+| Docker Compose | Local supporting services |
+
+## 4. Modules
+
+The API is organized into modules with distinct responsibilities.
+
+| Module | Responsibility |
+| --- | --- |
+| Tenant & Security | Tenant registration, API-key generation and hashing, authentication, and tenant context. |
+| Notification | Notification creation, retrieval, filtering, deletion, status, and asynchronous delivery handoff. |
+| Template | Tenant-scoped reusable templates and dynamic variable rendering. |
+| Preference | Tenant-scoped notification channel preferences for external user IDs. |
+| OutboxEvent | Transactional outbox persistence, event claiming, RabbitMQ publishing, and publisher retry handling. |
+| Rate Limiting | Limits notification creation requests by tenant API key. |
+| Shared / Configuration | Common response/error handling and application configuration. |
+
+Module-level documentation is maintained alongside the relevant packages. See the READMEs in the corresponding module directories for implementation details.
+
+## 5. Core Features
+
+### Multi-Tenant API-Key Authentication
+
+- Tenants register with the API and receive an API key.
+- The raw API key is returned to the tenant; a hash is persisted by the application.
+- Protected requests are authenticated using the tenant API key.
+- The authenticated tenant is made available to downstream request handling.
+- Tenant-owned resources are accessed using tenant-scoped service and repository operations.
+
+### Notification Management
+
+The API supports notification creation using:
+
+- Direct notification content.
+- A reusable template ID and a variable map.
+
+Notification management includes tenant-scoped retrieval, pagination, filtering, individual record lookup, and conditional deletion.
+
+### Templates and HTML Rendering
+
+Templates support subject, plain-text body, and HTML body content with `{{variableName}}` placeholders.
+
+The Template module uses separate text and HTML rendering methods. Dynamic values inserted into HTML content are escaped using OWASP Java Encoder's `Encode.forHtmlContent()`.
+
+### User Preferences
+
+Preferences are scoped by tenant and external `userId`. A tenant can manage whether a user should receive a notification through a particular channel.
+
+When a notification includes a `userId`:
+
+- The API checks the preference for the authenticated tenant and user.
+- If no preference record exists, delivery is allowed by default.
+- If the requested channel is disabled, the notification is saved as `SUPPRESSED` and no delivery event is created.
+
+If `userId` is absent, preference checking is skipped.
+
+### Tenant-Based Rate Limiting
+
+Notification creation is rate-limited using the tenant API key as the tenant identifier. The current implementation uses in-memory Bucket4j buckets.
+
+The rate limit is tenant-specific and protects the notification creation endpoint from excessive request volume.
+
+### Asynchronous Delivery
+
+For eligible notifications, the API:
+
+1. Saves the notification.
+2. Saves its outbox event in the same transaction.
+3. Allows the scheduled outbox publisher to claim the event.
+4. Publishes the notification ID to RabbitMQ.
+5. Returns the created notification without waiting for email delivery to complete.
+
+The Delivery Worker performs the actual delivery and records delivery attempt outcomes.
+
+## 6. Notification Processing Flow
+
+```text
+Client Request
+    |
+    v
+API-Key Authentication
+    |
+    v
+Tenant Rate Limit
+    |
+    v
+Validate Notification Request
+    |
+    v
+Resolve Direct Content or Render Template
+    |
+    v
+Check Tenant User Preference (if userId supplied)
+    |
+    +---- Channel disabled ----> Save as SUPPRESSED
+    |
+    v
+Transactional Save
+  - Notification
+  - OutboxEvent
+    |
+    v
+Commit
+    |
+    v
+Outbox Publisher
+    |
+    v
+RabbitMQ
+    |
+    v
+Delivery Worker
+```
+
+The notification and outbox event are persisted together. If the transaction fails, both records are rolled back.
+
+## 7. API Endpoints
+
+The API exposes REST endpoints for tenant registration, notification management, templates, and preferences.
+
+Some currently documented notification endpoints include:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/notifications/create` | Create a notification. |
+| `GET` | `/notifications` | Retrieve a tenant-scoped, paginated notification list with optional filters. |
+| `GET` | `/notifications/{id}` | Retrieve a notification by ID within the tenant scope. |
+| `DELETE` | `/notifications/{id}` | Delete a notification when its status permits deletion. |
+
+All protected endpoints require tenant authentication. Refer to each module's README and controller mappings for the complete endpoint list, request/response fields, validation rules, and status codes.
+
+## 8. Persistence
+
+The Notification API uses PostgreSQL for tenant, notification, template, preference, and outbox data.
+
+The Delivery Worker uses the same database to load notifications and persist delivery attempt records.
+
+The application uses JPA and repository-level tenant-scoped queries to enforce data ownership. The OutboxEvent module includes database-backed event claiming and indexes for eligible event lookup.
+
+## 9. RabbitMQ Integration
+
+The API publishes notification-ID messages to RabbitMQ using the configured notification exchange, delivery queue, and routing key.
+
+The configured topology includes:
+
+- Exchange: `notification.exchange`
+- Delivery queue: `notification.delivery.queue`
+- Routing key: `notification.delivery`
+
+The outbox publisher uses publisher confirms and retry scheduling. RabbitMQ publishing acceptance is separate from recipient delivery; delivery is completed asynchronously by the Worker.
+
+## 10. Local Development Setup
+
+### Prerequisites
+
+- Java 21
+- Docker Desktop
+- PostgreSQL
+- RabbitMQ
+- Mailpit
+- Maven (or use the included Maven Wrapper)
+
+The repository includes Docker Compose configuration for local supporting services. Start the required infrastructure and ensure the ports and credentials match the application configuration.
+
+### Configuration
+
+Application configuration is maintained in `application.properties`. Use environment variables for sensitive values rather than committing passwords or tokens.
+
+The API and Worker must be configured to connect to:
+
+- The same PostgreSQL database.
+- The same RabbitMQ broker.
+- The appropriate local SMTP/Mailpit endpoint for email testing.
+
+Check the current `application.properties` files for the exact property names and environment-variable placeholders.
+
+### Run the Notification API
+
+From the `notification-api` directory on Windows:
+
+```powershell
+.\mvnw.cmd spring-boot:run
+```
+
+The API runs on the configured application port (currently `8080` in local development).
+
+### Run the Delivery Worker
+
+From the `delivery-worker` directory:
+
+```powershell
+.\mvnw.cmd spring-boot:run
+```
+
+The Worker runs separately (currently `8081` in local development) and consumes delivery messages from RabbitMQ.
+
+## 11. Testing
+
+The project uses:
 
 - JUnit 5
 - Mockito
-- AssertJ
-- Spring Boot Test
 - MockMvc
+- Testcontainers
 
-Test coverage includes:
+Tests cover module-level business logic, API behavior, tenant isolation, notification preferences, outbox atomicity and claiming, RabbitMQ publishing, and Worker delivery/attempt handling.
 
-- Tenant registration and request validation.
-- API-key generation and hashing.
-- Valid, invalid and missing API-key authentication.
-- Notification creation and retrieval.
-- Tenant-scoped notification retrieval.
-- Cross-tenant access rejection.
-- Successful deletion of pending notifications.
-- Rejection of deletion for non-pending notifications.
-- Exception handling.
-- Mailpit email integration.
+Run the API tests from the `notification-api` directory:
 
-**Test execution result: 36 tests passed.**
+```powershell
+.\mvnw.cmd test
+```
 
-## Deferred Integration Testing
+Run the Worker tests from the `delivery-worker` directory:
 
-Comprehensive integration testing will be performed during a dedicated testing phase after core feature development.
+```powershell
+.\mvnw.cmd test
+```
 
-Planned coverage:
+## 12. Repository Layout
 
-- PostgreSQL integration testing using Testcontainers.
-- RabbitMQ integration testing using Testcontainers.
-- Repository-level tenant-isolation verification.
-- Integration testing across application components.
+```text
+notification-system-v2/
+├── notification-api/
+│   ├── pom.xml
+│   ├── mvnw
+│   ├── src/
+│   │   ├── main/
+│   │   └── test/
+│   └── README.md
+├── delivery-worker/
+│   ├── pom.xml
+│   ├── mvnw
+│   ├── src/
+│   │   ├── main/
+│   │   └── test/
+│   └── README.md
+├── docker-compose.yml
+└── README.md
+```
 
-## Phase 3 Completion Status
+The repository root contains shared local infrastructure configuration. The Notification API and Delivery Worker have separate Maven projects and application entry points.
 
-- [x] Tenant registration
-- [x] Secure API-key generation
-- [x] API-key hashing and storage
-- [x] Tenant authentication service
-- [x] Authentication interceptor
-- [x] Notification-tenant association
-- [x] Tenant-scoped notification retrieval
-- [x] Tenant-scoped notification deletion
-- [x] Exception handling
-- [x] Controller and service unit tests
-- [x] Full test suite – 36 tests passed
-- [ ] Comprehensive Testcontainers-based integration testing (deferred)
+## 13. Current Scope and Future Extensions
 
-**Phase 3: Core implementation completed.**
+The current implementation focuses on tenant-aware notification creation and asynchronous email delivery with reliable messaging and delivery-attempt tracking.
+
+The channel model includes `EMAIL`, `SMS`, and `PUSH`, but email is the implemented delivery channel. SMS and push delivery can be added behind channel-specific sender implementations as the project evolves.
+
+Potential future enhancements include:
+
+- API-key rotation and revocation.
+- More advanced tenant quotas and rate-limit configuration.
+- Additional notification channel providers.
+- Improved delivery observability and operational dashboards.
+- Production deployment and external infrastructure configuration.
